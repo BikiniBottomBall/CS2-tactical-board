@@ -1,0 +1,31 @@
+# ---- 大文件/产物（不入库，由管线再生成）----
+map_export/
+data/models/*.glb
+data/demos/raw/
+data/demos/parsed/
+
+# ---- 环境与依赖 ----
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+web/node_modules/
+web/dist/
+
+# ---- 用户数据 ----
+board.db
+board.db-journal
+positions.json
+uvicorn.log
+
+# ---- 系统/临时 ----
+Thumbs.db
+.DS_Store
+*.log
+
+# ---- 验证截图（本地产物）----
+calib_check.png
+utility_check.png
+tactic_check*.png
+replay_check*.png
+tmp_check.png

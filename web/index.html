@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CS2 战术板 - de_dust2 真实地图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e14; }
+  #app { width: 100%; height: 100%; }
+  canvas { display: block; }
+
+  /* ===== 暗色毛玻璃 UI ===== */
+  .glass-panel {
+    position: fixed;
+    background: rgba(16, 22, 32, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    color: #dfe6ee;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+
+  #panel-top {
+    top: 16px; left: 16px;
+    padding: 14px 18px;
+    min-width: 220px;
+  }
+  #panel-top h1 { font-size: 16px; font-weight: 600; letter-spacing: 1px; color: #f0f4f8; }
+  #panel-top h1 span { color: #ffa940; }
+  #panel-top .subtitle { margin-top: 4px; font-size: 11px; color: #8b98a8; }
+
+  /* ===== 加载进度 ===== */
+  #loading {
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 24px 36px;
+    text-align: center;
+    min-width: 320px;
+  }
+  #loading .title { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+  #loading .bar-track {
+    width: 100%; height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  #loading .bar-fill {
+    height: 100%; width: 0%;
+    background: #ffa940;
+    border-radius: 3px;
+    transition: width 0.2s;
+  }
+  #loading .pct { margin-top: 8px; font-size: 12px; color: #8b98a8; }
+
+  /* 截图模式：隐藏全部 UI */
+  body.shot .glass-panel,
+  body.shot #btn-topview { display: none !important; }
+
+  /* ===== 视角按钮 ===== */
+  #btn-topview {
+    position: fixed;
+    top: 16px; right: 16px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #0d1219;
+    background: #ffa940;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    z-index: 10;
+  }
+  #btn-topview:hover { background: #ffb85c; }
+
+  /* ===== 标点校准模式 ===== */
+  #btn-calib {
+    position: fixed;
+    top: 64px; right: 16px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(16, 22, 32, 0.55);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 10;
+  }
+  #btn-calib:hover { background: rgba(40, 50, 65, 0.75); }
+  body.calib #btn-calib { color: #0d1219; background: #ffa940; border-color: #ffa940; }
+  body.calib canvas { cursor: crosshair; }
+
+  /* 当前模式指示徽章（顶部居中，防止搞混标点/转镜头） */
+  #mode-badge {
+    position: fixed;
+    top: 16px; left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 18px;
+    font-size: 12px;
+    font-family: inherit;
+    border-radius: 20px;
+    z-index: 10;
+    pointer-events: none;
+    color: #c8d2dd;
+    background: rgba(16, 22, 32, 0.55);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  body.calib #mode-badge {
+    color: #0d1219;
+    font-weight: 600;
+    background: #ffa940;
+    border-color: #ffa940;
+  }
+  body.shot #mode-badge { display: none !important; }
+
+  #panel-calib {
+    top: 108px; right: 16px;
+    width: 250px;
+    padding: 12px 14px;
+    display: none;
+  }
+  body.calib #panel-calib { display: block; }
+  body.shot #btn-calib, body.shot #panel-calib { display: none !important; }
+  .calib-title { font-size: 13px; font-weight: 600; color: #f0f4f8; margin-bottom: 4px; }
+  .calib-hint { font-size: 11px; color: #8b98a8; margin-bottom: 8px; line-height: 1.5; }
+  #calib-coords { font-size: 12px; color: #ffa940; margin-bottom: 8px; font-family: Consolas, monospace; }
+  .calib-row { display: flex; gap: 6px; }
+  #calib-name {
+    flex: 1;
+    padding: 7px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #dfe6ee;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    outline: none;
+  }
+  #calib-save {
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #0d1219;
+    background: #ffa940;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  #calib-list { margin-top: 10px; max-height: 220px; overflow-y: auto; }
+  .calib-modes { display: flex; gap: 6px; margin-bottom: 8px; }
+  .calib-modes button {
+    flex: 1;
+    padding: 6px 0;
+    font-size: 12px;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .calib-modes button.active { color: #0d1219; font-weight: 600; background: #ffa940; border-color: #ffa940; }
+  #calib-layer { font-size: 11px; color: #7ec8ff; margin-bottom: 6px; min-height: 14px; }
+  #calib-height-row { align-items: center; margin-bottom: 8px; }
+  #calib-height-row button {
+    width: 28px; padding: 4px 0;
+    font-size: 14px; font-weight: 600;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  #calib-height-row button:hover { background: rgba(255,255,255,0.14); }
+  #calib-height { flex: 1; text-align: center; font-size: 11px; color: #8b98a8; }
+  #calib-parent {
+    max-width: 84px;
+    padding: 7px 4px;
+    font-size: 11px;
+    font-family: inherit;
+    color: #dfe6ee;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    outline: none;
+  }
+  #calib-parent option { background: #101620; }
+  .calib-mini-btn {
+    flex: 1;
+    padding: 5px 0;
+    font-size: 11px;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .calib-mini-btn:hover { background: rgba(255,255,255,0.14); }
+  .calib-style-editor {
+    padding: 6px 8px;
+    margin: 2px 0 6px 14px;
+    border-left: 2px solid rgba(255,169,64,0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .style-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #8b98a8;
+  }
+  .style-field input[type="color"] {
+    width: 26px; height: 18px;
+    padding: 0;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+  }
+  .style-field input[type="range"] { flex: 1; accent-color: #ffa940; }
+  .scale-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: #8b98a8;
+  }
+  .scale-row input { flex: 1; accent-color: #ffa940; }
+  .calib-font-btn {
+    background: none; border: none; color: #8b98a8;
+    font-size: 11px; cursor: pointer; padding: 0 2px;
+  }
+  .calib-font-btn:hover { color: #ffa940; }
+  .calib-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #c8d2dd;
+    padding: 4px 2px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .calib-item .calib-type { font-size: 10px; color: #6b7888; }
+  .calib-item .calib-xyz { color: #6b7888; font-size: 10px; font-family: Consolas, monospace; margin-left: auto; }
+  .calib-item button {
+    background: none; border: none; color: #8b98a8;
+    font-size: 14px; cursor: pointer; padding: 0 4px;
+  }
+  .calib-item button:hover { color: #ff5252; }
+
+  /* ===== 左侧工具栏 ===== */
+  #toolbar {
+    top: 50%; left: 16px;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    width: 108px;
+  }
+  #toolbar button {
+    padding: 8px 0;
+    font-size: 12px;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  #toolbar button:hover { background: rgba(255, 255, 255, 0.14); }
+  #toolbar button.active {
+    color: #0d1219;
+    font-weight: 600;
+    background: #ffa940;
+    border-color: #ffa940;
+  }
+  #toolbar .tb-sep { height: 1px; background: rgba(255,255,255,0.1); margin: 2px 0; }
+  #toolbar .tb-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: 1px;
+  }
+
+  /* ===== 道具库 ===== */
+  #btn-utility {
+    position: fixed;
+    top: 112px; right: 16px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(16, 22, 32, 0.55);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 10;
+  }
+  #btn-utility:hover { background: rgba(40, 50, 65, 0.75); }
+  body.utility #btn-utility { color: #0d1219; background: #ffa940; border-color: #ffa940; }
+  body.shot #btn-utility, body.shot #panel-utility { display: none !important; }
+
+  #panel-utility {
+    right: 16px; bottom: 16px;
+    width: 260px;
+    padding: 12px 14px;
+    display: none;
+    max-height: 48vh;
+    overflow-y: auto;
+  }
+  body.utility #panel-utility { display: block; }
+  .util-group-title {
+    font-size: 11px; color: #6b7888;
+    margin: 8px 0 2px;
+    letter-spacing: 1px;
+  }
+  .util-item { align-items: center; }
+  .util-item .util-name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .util-item.selected .util-name { color: #ffa940; font-weight: 600; }
+  .util-item .util-throw { font-size: 10px; color: #6b7888; }
+  .util-item button {
+    background: none; border: none; color: #8b98a8;
+    font-size: 12px; cursor: pointer; padding: 0 4px;
+  }
+  .util-item button:hover { color: #ffa940; }
+  .util-step-btns button.active { color: #0d1219; font-weight: 600; background: #ffa940; border-color: #ffa940; }
+
+  /* ===== 战术时间轴 ===== */
+  #btn-tactic {
+    position: fixed;
+    top: 160px; right: 16px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(16, 22, 32, 0.55);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 10;
+  }
+  #btn-tactic:hover { background: rgba(40, 50, 65, 0.75); }
+  body.tactic #btn-tactic { color: #0d1219; background: #ffa940; border-color: #ffa940; }
+  body.shot #btn-tactic, body.shot #panel-tactic { display: none !important; }
+
+  #panel-tactic {
+    left: 50%; bottom: 16px;
+    transform: translateX(-50%);
+    min-width: 560px;
+    max-width: 84vw;
+    padding: 10px 14px;
+    display: none;
+  }
+  body.tactic #panel-tactic { display: block; }
+  .tactic-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .tactic-row select {
+    flex: 0 1 180px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #dfe6ee;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    outline: none;
+  }
+  .tactic-row select option { background: #101620; }
+  .tactic-row button {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .tactic-row button:hover { background: rgba(255,255,255,0.14); }
+  #tactic-play { color: #0d1219; font-weight: 600; background: #ffa940; border-color: #ffa940; }
+  #tactic-play:hover { background: #ffb85c; }
+
+  #tactic-steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .step-chip {
+    min-width: 30px;
+    padding: 5px 0;
+    text-align: center;
+    font-size: 13px;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .step-chip:hover { background: rgba(255,255,255,0.14); }
+  .step-chip.active { color: #0d1219; font-weight: 600; background: #ffa940; border-color: #ffa940; }
+  .step-chip.playing { color: #0d1219; font-weight: 600; background: #7ec8ff; border-color: #7ec8ff; }
+
+  #step-editor { margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; }
+  #step-editor label { font-size: 11px; color: #8b98a8; display: flex; align-items: center; gap: 4px; }
+  #step-editor input[type="number"] {
+    width: 56px;
+    padding: 5px 6px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #dfe6ee;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    outline: none;
+  }
+  #step-note {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #dfe6ee;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    outline: none;
+  }
+  #step-utilities {
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    max-height: 84px; overflow-y: auto;
+    margin: 6px 0;
+    font-size: 11px; color: #c8d2dd;
+  }
+  #step-utilities label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #panel-tactic.playing #step-editor,
+  #panel-tactic.playing #tactic-steps .step-chip,
+  #panel-tactic.playing .tactic-row select,
+  #panel-tactic.playing .tactic-row button:not(#tactic-play) {
+    pointer-events: none; opacity: 0.45;
+  }
+
+  /* ===== Demo 回放 ===== */
+  #btn-demo {
+    position: fixed;
+    top: 208px; right: 16px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(16, 22, 32, 0.55);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 10;
+  }
+  #btn-demo:hover { background: rgba(40, 50, 65, 0.75); }
+  body.demo #btn-demo { color: #0d1219; background: #ffa940; border-color: #ffa940; }
+  body.shot #btn-demo, body.shot #panel-demo { display: none !important; }
+
+  #panel-demo {
+    top: 252px; right: 16px;
+    width: 300px;
+    padding: 12px 14px;
+    display: none;
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+  body.demo #panel-demo { display: block; }
+  .demo-item { align-items: center; }
+  .demo-item .demo-name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .demo-item.selected .demo-name { color: #ffa940; font-weight: 600; }
+  .demo-item .demo-meta { font-size: 10px; color: #6b7888; }
+  .demo-item button {
+    background: none; border: none; color: #8b98a8;
+    font-size: 12px; cursor: pointer; padding: 0 4px;
+  }
+  .demo-item button:hover { color: #ff5252; }
+
+  .bookmark-track { position: relative; padding-top: 12px; }
+  .bookmark-dot {
+    position: absolute;
+    top: 2px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    transform: translateX(-50%);
+    cursor: pointer;
+    border: 1px solid rgba(0,0,0,0.5);
+  }
+  .bookmark-dot:hover { transform: translateX(-50%) scale(1.5); }
+  #replay-slider { width: 100%; accent-color: #ffa940; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="panel-top" class="glass-panel">
+  <h1>CS2 <span>战术板</span></h1>
+  <div class="subtitle">de_dust2 · 官方地图模型</div>
+  <div class="subtitle" style="margin-top:6px;color:#6b7888">WASD 移动 · PgUp/PgDn 升降 · Shift 加速 · R 复位<br>左键旋转 · 右键平移 · 滚轮缩放 · Q 校准模式</div>
+  <div class="scale-row">标记大小 <input type="range" id="marker-scale" min="0.5" max="2" step="0.1"></div>
+  <div class="scale-row">画质
+    <select id="sel-quality" style="flex:1;background:rgba(255,255,255,0.06);color:#dfe6ee;border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:3px 4px;font-family:inherit">
+      <option value="smooth">流畅</option>
+      <option value="balanced">均衡</option>
+      <option value="quality">画质</option>
+    </select>
+  </div>
+</div>
+
+<button id="btn-topview">⬇ 正俯视视角</button>
+<button id="btn-calib">🎯 标点校准</button>
+<div id="mode-badge">👁 浏览模式（Q 切换校准）</div>
+
+<div id="panel-calib" class="glass-panel">
+  <div class="calib-title">标点校准模式</div>
+  <div class="calib-hint">点标记：左键取点（Tab 切层，+/- 调高度）<br>区域圈地：左键连续放顶点，回车/点起点闭合<br>Ctrl+Z 撤销顶点 · Esc 取消<br>镜头：Alt+左键旋转 · 中键或空格+左键平移 · 滚轮缩放</div>
+  <div class="calib-modes">
+    <button id="calib-mode-point" class="active">点标记</button>
+    <button id="calib-mode-region">区域圈地</button>
+  </div>
+  <div id="calib-layer"></div>
+  <div id="calib-coords">坐标：点击地图取点</div>
+  <div class="calib-row" id="calib-height-row">
+    <button id="calib-hminus" title="降低高度">−</button>
+    <span id="calib-height">高度微调 0</span>
+    <button id="calib-hplus" title="升高高度">+</button>
+  </div>
+  <div class="calib-row">
+    <input id="calib-name" placeholder="名称（如 A点 / A大）">
+    <select id="calib-parent"><option value="">无父级</option></select>
+    <button id="calib-save">保存</button>
+  </div>
+  <div class="calib-row" style="margin-top:6px">
+    <button id="calib-export" class="calib-mini-btn">导出备份</button>
+    <button id="calib-import" class="calib-mini-btn">导入备份</button>
+    <input type="file" id="calib-import-file" accept=".json" hidden>
+  </div>
+  <div id="calib-list"></div>
+</div>
+
+<button id="btn-utility">🧨 道具库</button>
+<div id="panel-utility" class="glass-panel">
+  <div class="calib-title">道具库</div>
+  <div id="utility-list"></div>
+  <div class="calib-row" style="margin-top:8px">
+    <button id="utility-add" class="calib-mini-btn">＋ 录入道具</button>
+  </div>
+  <div id="utility-entry" style="display:none;margin-top:8px">
+    <div class="calib-hint">左键取点（Tab 切层，+/- 调高度）<br>① 点站位 → ② 点落点 → 保存 · Esc 取消</div>
+    <div class="calib-modes" id="utility-types">
+      <button data-utype="smoke" class="active">烟雾弹</button>
+      <button data-utype="flash">闪光弹</button>
+      <button data-utype="molotov">燃烧弹</button>
+    </div>
+    <div class="calib-modes" id="utility-throws">
+      <button data-uthrow="站投" class="active">站投</button>
+      <button data-uthrow="跳投">跳投</button>
+      <button data-uthrow="跑投">跑投</button>
+    </div>
+    <div class="calib-modes util-step-btns">
+      <button id="utility-step-stand" class="active">① 站位</button>
+      <button id="utility-step-landing">② 落点</button>
+    </div>
+    <div id="utility-layer"></div>
+    <div id="utility-coords">点击地图选站位</div>
+    <div class="calib-row" id="utility-height-row">
+      <button id="utility-hminus" title="降低高度">−</button>
+      <span id="utility-height">高度微调 0</span>
+      <button id="utility-hplus" title="升高高度">+</button>
+    </div>
+    <div class="calib-row">
+      <input id="utility-name" placeholder="名称">
+      <button id="utility-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<button id="btn-demo">📼 Demo</button>
+<div id="panel-demo" class="glass-panel">
+  <div class="calib-title">Demo 回放</div>
+  <div id="demo-list"></div>
+  <div class="calib-row" style="margin-top:8px">
+    <button id="demo-upload-btn" class="calib-mini-btn">⬆ 上传 demo</button>
+    <input type="file" id="demo-upload-file" accept=".dem" hidden>
+  </div>
+  <div id="demo-status" class="calib-hint" style="margin-top:4px"></div>
+  <div id="replay-bar" style="display:none;margin-top:8px;border-top:1px solid rgba(255,255,255,0.08);padding-top:2px">
+    <div class="bookmark-track" id="bookmark-track">
+      <input type="range" id="replay-slider" min="0" step="0.1" value="0">
+    </div>
+    <div class="calib-row" style="margin-top:4px">
+      <button id="replay-play" class="calib-mini-btn" style="flex:0 0 44px">▶</button>
+      <button id="replay-speed" class="calib-mini-btn" style="flex:0 0 44px">1x</button>
+      <span id="replay-time" class="calib-hint" style="margin:0">0:00 / 0:00</span>
+    </div>
+  </div>
+</div>
+
+<button id="btn-tactic">🎬 战术</button>
+<div id="panel-tactic" class="glass-panel">
+  <div class="tactic-row">
+    <select id="tactic-select"></select>
+    <button id="tactic-new" title="新建战术">＋</button>
+    <button id="tactic-rename" title="改名">✎</button>
+    <button id="tactic-delete" title="删除战术">×</button>
+    <span style="flex:1"></span>
+    <button id="tactic-play">▶ 播放</button>
+  </div>
+  <div id="tactic-steps"></div>
+  <div id="step-editor" style="display:none">
+    <div class="calib-hint" style="margin-bottom:4px">拖动地图上的演员摆位（该步目标位置）</div>
+    <div class="tactic-row">
+      <label>时长 <input id="step-duration" type="number" min="0.5" step="0.5" value="2"> 秒</label>
+      <input id="step-note" placeholder="备注（如：T 全员 A 大推进）">
+    </div>
+    <div id="step-utilities"></div>
+    <div class="tactic-row" style="margin-bottom:0">
+      <button id="step-save">保存步骤</button>
+      <span id="step-save-hint" class="calib-hint" style="margin:0"></span>
+    </div>
+  </div>
+</div>
+
+<div id="toolbar" class="glass-panel">
+  <button data-tool="select" class="active">选择/移动</button>
+  <button data-tool="brush">画笔</button>
+  <div class="tb-sep"></div>
+  <button data-tool="marker-t"><span class="tb-dot" style="background:#ff7a3d"></span>T 标记</button>
+  <button data-tool="marker-ct"><span class="tb-dot" style="background:#5aa9ff"></span>CT 标记</button>
+  <div class="tb-sep"></div>
+  <button data-tool="smoke"><span class="tb-dot" style="background:#9aa5ad"></span>烟雾弹</button>
+  <button data-tool="flash"><span class="tb-dot" style="background:#ffe082"></span>闪光弹</button>
+  <button data-tool="molotov"><span class="tb-dot" style="background:#ff7043"></span>燃烧弹</button>
+  <div class="tb-sep"></div>
+  <button data-tool="eraser">橡皮擦</button>
+  <button id="btn-undo">撤销</button>
+  <button id="btn-clear">清空</button>
+  <div class="tb-sep"></div>
+  <button id="btn-tb-topview">正俯视</button>
+</div>
+
+<div id="loading" class="glass-panel">
+  <div class="title">正在加载 de_dust2 官方地图模型…</div>
+  <div class="bar-track"><div class="bar-fill" id="load-bar"></div></div>
+  <div class="pct" id="load-pct">0%</div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
