@@ -5,17 +5,34 @@
  * 只记录不模拟：位置帧间 lerp 插值，不预测。
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
-import { scene } from './state';
+import { scene, collisionMesh } from './state';
 import { MARKER_DEFS } from './config';
 import { createActorVisual } from './tactic';
 import { spawnLandingEffect } from './utility';
-import { sourceToWorld, sourceYawToRadians } from './coords';
+import { worldToScene, sourceYawToRadians } from './coords';
+import { boardRaycaster } from './board';
+import { registerMode } from './tools';
 
 const BOOKMARK_COLORS = {
   round_start: '#ffffff', round_end: '#6b7888',
   kill: '#ff5252', plant: '#ffa940', defuse: '#5aa9ff',
 };
 const SPEEDS = [1, 2, 4];
+
+const _down = new THREE.Vector3(0, -1, 0);
+const _rayOrigin = new THREE.Vector3();
+
+/* 高度吸附：从演员位置上方 4 单位向下打射线（走 BVH 地面层），
+ * 命中点落在下方 8 单位窗口内则贴地，防止转换残差导致浮空/埋地；
+ * 从演员自身高度起算，隧道内不会吸到上层地面 */
+function snapGround(pos) {
+  if (!collisionMesh) return pos;
+  _rayOrigin.set(pos.x, pos.y + 4, pos.z);
+  boardRaycaster.set(_rayOrigin, _down);
+  const hits = boardRaycaster.intersectObject(collisionMesh, false);
+  if (hits.length && hits[0].point.y > pos.y - 8) pos.y = hits[0].point.y;
+  return pos;
+}
 
 let demos = [];
 let currentDemoId = null;
@@ -233,14 +250,14 @@ function renderFrame() {
     const y = a && b ? a[1] + (b[1] - a[1]) * k : src[1];
     const z = a && b ? a[2] + (b[2] - a[2]) * k : src[2];
     const yaw = a && b ? lerpAngle(a[3], b[3], k) : src[3];
-    obj.group.position.copy(sourceToWorld(x, y, z, _v));
+    obj.group.position.copy(snapGround(worldToScene(x, y, z, _v)));
     obj.group.rotation.y = sourceYawToRadians(yaw);
   }
 
   // 道具事件：到点放效果
   while (firedUtilIdx < pack.utility_events.length && pack.utility_events[firedUtilIdx].tick <= tick) {
     const e = pack.utility_events[firedUtilIdx++];
-    spawnLandingEffect({ type: e.type }, sourceToWorld(e.x, e.y, e.z, new THREE.Vector3()));
+    spawnLandingEffect({ type: e.type }, worldToScene(e.x, e.y, e.z, new THREE.Vector3()));
   }
 
   // 道具弹道：真实采样点插值
@@ -265,7 +282,7 @@ function renderFrame() {
     const p0 = pts[j], p1 = pts[j + 1];
     const span = p1[0] - p0[0];
     const kk = span > 0 ? (tick - p0[0]) / span : 0;
-    mesh.position.copy(sourceToWorld(
+    mesh.position.copy(worldToScene(
       p0[1] + (p1[1] - p0[1]) * kk,
       p0[2] + (p1[2] - p0[2]) * kk,
       p0[3] + (p1[3] - p0[3]) * kk,
@@ -307,9 +324,14 @@ export function updateReplay(dt) {
 export function initReplay() {
   scene.add(replayGroup);
 
-  document.getElementById('btn-demo').addEventListener('click', () => {
-    const open = document.body.classList.toggle('demo');
-    if (open) fetchDemos();
+  registerMode('demo', {
+    label: '📼 Demo 回放',
+    toggleOff: true,
+    enter: () => {
+      document.body.classList.add('demo');
+      fetchDemos();
+    },
+    exit: () => { document.body.classList.remove('demo'); },
   });
   document.getElementById('demo-upload-btn').addEventListener('click', () => {
     document.getElementById('demo-upload-file').click();

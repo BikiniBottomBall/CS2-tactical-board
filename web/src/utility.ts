@@ -2,14 +2,14 @@
 /* ------------------------------------------------------------
  * 道具库（P4）：lineup 录入（站位/落点/投掷方式）、REST 存储、
  * 轨迹预览（二次贝塞尔虚线）、播放动画（弹体 + 落地效果）。
- * 录入取点复用 calib 的分层命中（raycastMapAll + Tab 切层 + +/- 微调）。
- * 与校准模式互斥：进录录取决校准，进校准取消录入。
+ * 录入取点复用 board 的分层命中（raycastMapAll + Tab 切层 + +/- 微调）。
+ * 面板开合与互斥由 tools.ts 状态机统一调度。
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
 import { scene, renderer, mapGroup } from './state';
 import { MARKER_DEFS } from './config';
-import { getDotTexture } from './board';
-import { calibMode, setCalibMode, raycastMapAll } from './calib';
+import { getDotTexture, raycastMapAll } from './board';
+import { registerMode } from './tools';
 
 const TYPE_ORDER = ['smoke', 'flash', 'molotov'];
 const TYPE_NAMES = { smoke: '烟雾弹', flash: '闪光弹', molotov: '燃烧弹' };
@@ -364,7 +364,6 @@ function suggestName() {
 
 function enterRecording() {
   if (recording) return;
-  if (calibMode) setCalibMode(false); // 与校准模式互斥
   recording = { type: 'smoke', throwType: '站投', step: 'stand', stand: null, landing: null };
   utilHits = [];
   utilHitIdx = 0;
@@ -459,8 +458,16 @@ function adjustUtilHeight(delta) {
 export function initUtility() {
   scene.add(trajPreview, pickPreview, fxGroup);
 
-  document.getElementById('btn-utility').addEventListener('click', () => {
-    document.body.classList.toggle('utility');
+  // 面板模式注册进状态机：enter 开面板，exit 关面板并清理录入/预览
+  registerMode('utility', {
+    label: '🧨 道具库',
+    toggleOff: true,
+    enter: () => { document.body.classList.add('utility'); },
+    exit: () => {
+      cancelUtilityRecording();
+      selectUtility(null);
+      document.body.classList.remove('utility');
+    },
   });
   document.getElementById('utility-add').addEventListener('click', enterRecording);
 
@@ -507,9 +514,9 @@ export function initUtility() {
     e.stopPropagation();
   });
 
-  /* 地图取点（board 的 pointerdown 在录入时已让路） */
+  /* 地图取点（仅录入中响应；board 在其他工具激活时才监听，天然让路） */
   renderer.domElement.addEventListener('pointerdown', e => {
-    if (!recording || calibMode || e.button !== 0) return;
+    if (!recording || e.button !== 0) return;
     const hits = raycastMapAll(e);
     if (!hits.length) return;
     utilHits = hits;
@@ -524,9 +531,7 @@ export function initUtility() {
   window.addEventListener('keydown', e => {
     if (!recording) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    if (e.code === 'Escape') {
-      cancelUtilityRecording();
-    } else if (e.code === 'Tab') {
+    if (e.code === 'Tab') {
       e.preventDefault();
       if (utilHits.length > 1) selectUtilHit(utilHitIdx + (e.shiftKey ? -1 : 1));
     } else if (e.code === 'Equal' || e.code === 'NumpadAdd') {

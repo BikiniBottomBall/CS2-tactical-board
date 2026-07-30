@@ -3,20 +3,14 @@
  * 战术板：T/CT 标记、画笔箭头路线、烟闪火道具
  * 橡皮擦 / 撤销 / 清空 / localStorage 持久化
  * 所有放置与拖拽均 raycast 地图表面取高度，贴地不悬空
+ * 工具激活由 tools.ts 状态机统一调度（互斥）
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
 import { scene, camera, renderer, controls, mapGroup } from './state';
 import { STORAGE_KEY_BOARD, MARKER_DEFS, LINE_COLOR } from './config';
-import {
-  calibMode, altHeld, spaceHeld, editingRegion, calibDrawMode, calibHits,
-  regionDrawing, setCalibHits, selectCalibHit, addRegionVertex,
-  onEditPointerDown, onEditPointerMove, onEditPointerUp,
-  raycastMapAll, updateRegionPreview, renderPositionLabels,
-} from './calib';
-import { isUtilityRecording } from './utility';
-import { isTacticEditing } from './tactic';
+import { registerMode, isBoardTool } from './tools';
 
-let currentTool = 'select';
+let currentTool = null;      // 仅在本模块工具激活时非空（由状态机驱动）
 const markersGroup = new THREE.Group();
 const linesGroup = new THREE.Group();
 const boardItems = new Map(); // id -> { type:'marker'|'line', group, kind?, points? }
@@ -32,23 +26,50 @@ const boardPointer = new THREE.Vector2();
 
 export { boardRaycaster };
 
+/* 各画板工具的激活/退出钩子（注册进状态机） */
+const TOOL_LABELS = {
+  select: '选择/移动', brush: '✏ 画笔', eraser: '橡皮擦',
+  'marker-t': 'T 标记', 'marker-ct': 'CT 标记',
+  smoke: '烟雾弹', flash: '闪光弹', molotov: '燃烧弹',
+};
+
+function updateCursor() {
+  const cross = currentTool && currentTool !== 'select';
+  renderer.domElement.style.cursor = cross ? 'crosshair' : '';
+}
+
+/* 退出工具时中止进行中的手势（拖标记/画笔预览），恢复镜头 */
+function abortGesture() {
+  if (drawing) {
+    if (drawing.line) {
+      linesGroup.remove(drawing.line);
+      drawing.line.geometry.dispose();
+      drawing.line.material.dispose();
+    }
+    drawing = null;
+  }
+  dragMarkerId = null;
+  controls.enabled = true;
+}
+
 export function initBoard() {
   markersGroup.name = 'markers';
   linesGroup.name = 'lines';
   scene.add(markersGroup, linesGroup);
 
-  // 工具栏
-  document.querySelectorAll('#toolbar button[data-tool]').forEach(btn => {
-    btn.addEventListener('click', () => setTool(btn.dataset.tool));
-  });
+  // 工具注册进状态机（侧边栏按钮统一由 tools.ts 接线）
+  for (const tool of Object.keys(TOOL_LABELS)) {
+    registerMode(tool, {
+      label: TOOL_LABELS[tool],
+      enter: () => { currentTool = tool; updateCursor(); },
+      exit: () => { if (currentTool === tool) currentTool = null; abortGesture(); updateCursor(); },
+    });
+  }
   document.getElementById('btn-undo').addEventListener('click', undoBoard);
   document.getElementById('btn-clear').addEventListener('click', clearBoard);
-  document.getElementById('btn-tb-topview').addEventListener('click', () => {
-    document.getElementById('btn-topview').click();
-  });
   window.addEventListener('keydown', e => {
-    // 校准模式下 Ctrl+Z 归校准系统（撤销顶点），不触发画板撤销
-    if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey) && !calibMode && !isUtilityRecording() && !isTacticEditing()) undoBoard();
+    // 仅画板工具激活时响应 Ctrl+Z（其他模式有自己的撤销语义）
+    if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey) && isBoardTool()) undoBoard();
   });
 
   // 全局标记大小滑杆
@@ -63,13 +84,6 @@ export function initBoard() {
   dom.addEventListener('contextmenu', onBoardRightClick);
 }
 
-function setTool(tool) {
-  currentTool = tool;
-  document.querySelectorAll('#toolbar button[data-tool]').forEach(b => {
-    b.classList.toggle('active', b.dataset.tool === tool);
-  });
-}
-
 export function setBoardPointer(e) {
   boardPointer.x = (e.clientX / window.innerWidth) * 2 - 1;
   boardPointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -82,6 +96,13 @@ export function raycastMapPoint(e) {
   setBoardPointer(e);
   const hits = boardRaycaster.intersectObjects(mapGroup.children, false);
   return hits.length ? hits[0].point.clone() : null;
+}
+
+/* 射线返回所有命中层级（道具录入分层取点用） */
+export function raycastMapAll(e) {
+  if (!mapGroup) return [];
+  setBoardPointer(e);
+  return boardRaycaster.intersectObjects(mapGroup.children, false);
 }
 
 /* 拾取已放置的标记/线条（沿父链找 itemId） */
@@ -147,7 +168,13 @@ export let markerScale = parseFloat(localStorage.getItem('cs2-marker-scale') || 
 function setMarkerScale(v) {
   markerScale = v;
   localStorage.setItem('cs2-marker-scale', String(v));
-  renderPositionLabels();
+  // 同步缩放已放置的画板标记
+  boardItems.forEach(item => {
+    if (item.type !== 'marker') return;
+    const sprite = item.group.userData.sprite;
+    const base = item.group.userData.spriteBase;
+    if (sprite && base) sprite.scale.set(base[0] * v, base[1] * v, 1);
+  });
 }
 
 function createMarker(toolKey, pos) {
@@ -163,9 +190,12 @@ function createMarker(toolKey, pos) {
   group.add(base);
 
   const sprite = createMarkerSprite(def.label, def.css);
-  sprite.scale.set(def.big ? 0.16 : 0.13, def.big ? 0.08 : 0.065, 1);
+  const sbase = def.big ? [0.16, 0.08] : [0.13, 0.065];
+  sprite.scale.set(sbase[0] * markerScale, sbase[1] * markerScale, 1);
   sprite.position.y = def.big ? 4.2 : 3.4;
   group.add(sprite);
+  group.userData.sprite = sprite;
+  group.userData.spriteBase = sbase;
 
   group.position.copy(pos);
   const id = boardSeq++;
@@ -277,26 +307,10 @@ export function restoreBoard() {
   }
 }
 
-/* ---- 指针交互 ---- */
+/* ---- 指针交互（仅在本模块工具激活时响应，互斥由状态机保证） ---- */
 function onBoardPointerDown(e) {
-  if (isUtilityRecording() || isTacticEditing()) return; // 道具录入/战术编辑：左键归对应系统
-  if (e.button !== 0 || !mapGroup) return;
+  if (e.button !== 0 || !mapGroup || !currentTool) return;
   pointerMoved = false;
-
-  // 校准模式：点模式分层取点 / 区域模式放顶点 / 编辑模式拖顶点
-  // 按住 Alt（旋转）或空格（平移）时左键归镜头，不标点
-  if (calibMode) {
-    if (altHeld || spaceHeld) return;
-    if (editingRegion) { onEditPointerDown(e); return; }
-    if (calibDrawMode === 'region') {
-      const hits = raycastMapAll(e);
-      if (hits.length) addRegionVertex(hits[0].point);
-    } else {
-      setCalibHits(raycastMapAll(e));
-      if (calibHits.length) selectCalibHit(0);
-    }
-    return;
-  }
 
   if (currentTool === 'select') {
     const id = pickBoardItem(e);
@@ -329,18 +343,6 @@ function onBoardPointerDown(e) {
 }
 
 function onBoardPointerMove(e) {
-  // 校准模式：区域编辑拖拽 / 圈地橡皮筋预览
-  if (calibMode && mapGroup) {
-    if (editingRegion && (editingRegion.dragIdx >= 0 || editingRegion.dragWhole)) {
-      onEditPointerMove(e);
-      return;
-    }
-    if (calibDrawMode === 'region' && regionDrawing) {
-      const pt = raycastMapPoint(e);
-      if (pt) updateRegionPreview(pt);
-    }
-    return;
-  }
   if (dragMarkerId === null && !drawing) return;
   pointerMoved = true;
   const pt = raycastMapPoint(e);
@@ -370,10 +372,6 @@ function onBoardPointerMove(e) {
 }
 
 function onBoardPointerUp() {
-  if (calibMode && editingRegion && (editingRegion.dragIdx >= 0 || editingRegion.dragWhole)) {
-    onEditPointerUp();
-    return;
-  }
   if (dragMarkerId !== null) {
     dragMarkerId = null;
     controls.enabled = true;
@@ -399,10 +397,10 @@ function onBoardPointerUp() {
   }
 }
 
-/* 右键：校准模式下不占用（撤销顶点用 Ctrl+Z）；浏览模式删除标记/线条 */
+/* 右键：画板工具激活时删除标记/线条 */
 function onBoardRightClick(e) {
   e.preventDefault();
-  if (!mapGroup || calibMode || isUtilityRecording() || isTacticEditing()) return;
+  if (!mapGroup || !isBoardTool()) return;
   const id = pickBoardItem(e);
   if (id !== null) {
     removeBoardItem(id);

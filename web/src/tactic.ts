@@ -9,12 +9,15 @@ import * as THREE from 'three';
 import { scene, renderer, controls, mapGroup } from './state';
 import { MARKER_DEFS, r1 } from './config';
 import { createMarkerSprite, boardRaycaster, setBoardPointer, raycastMapPoint } from './board';
-import { playUtility, getUtilityById, getUtilities, isUtilityRecording } from './utility';
-import { calibMode } from './calib';
+import { playUtility, getUtilityById, getUtilities } from './utility';
+import { registerMode, getMode } from './tools';
+import { worldToScene } from './coords';
 
 const ACTOR_IDS = ['T1', 'T2', 'T3', 'T4', 'T5', 'CT1', 'CT2', 'CT3', 'CT4', 'CT5'];
-const T_SPAWN = { x: -56, y: 5, z: 48 };    // 匪家默认区
-const CT_SPAWN = { x: -25, y: 20, z: -50 }; // 警家默认区
+/* 出生点锚点（CS2 Source 世界坐标），经 worldToScene 换算到场景，
+ * 与地图模型/demo 回放共用同一坐标变换，模型重导出后自动跟随 */
+const T_SPAWN_SRC = { x: 2128, y: 1472, z: 64 };  // 匪家默认区
+const CT_SPAWN_SRC = { x: -447, y: 3138, z: 64 }; // 警家默认区
 const THROW_INTERVAL = 0.8;  // 同一步内道具依次投出间隔（秒）
 const HOLD_TIME = 1.5;       // 步间停留（秒）
 
@@ -46,8 +49,15 @@ export function isTacticEditing() {
 function defaultActorPos(id) {
   const isT = id[0] === 'T';
   const n = parseInt(id.slice(isT ? 1 : 2), 10) - 1;
-  const base = isT ? T_SPAWN : CT_SPAWN;
+  const src = isT ? T_SPAWN_SRC : CT_SPAWN_SRC;
+  const base = worldToScene(src.x, src.y, src.z);
   return { x: base.x + (n % 3) * 4 - 4, y: base.y, z: base.z + Math.floor(n / 3) * 4 };
+}
+
+/* actorPos 依赖 worldToScene（地图就绪后才可用），故延迟到首次使用时填充 */
+function ensureActorDefaults() {
+  if (!mapGroup) return;
+  ACTOR_IDS.forEach(id => { if (!actorPos[id]) actorPos[id] = defaultActorPos(id); });
 }
 
 function groundY(x, z, fallback) {
@@ -88,6 +98,7 @@ function syncActor(id) {
 }
 
 function syncAllActors() {
+  ensureActorDefaults();
   ACTOR_IDS.forEach(syncActor);
 }
 
@@ -365,27 +376,33 @@ export function updateTactic(dt) {
  * ---------------------------------------------------------- */
 export function initTactic() {
   ACTOR_IDS.forEach(id => {
-    actorPos[id] = defaultActorPos(id);
+    // actorPos 不在此处初始化：worldToScene 依赖地图就绪，
+    // 首次 syncAllActors（打开面板）时由 ensureActorDefaults 填充
     const obj = createActor(id);
     actorObjects.set(id, obj);
     actorsGroup.add(obj);
   });
   scene.add(actorsGroup);
 
-  document.getElementById('btn-tactic').addEventListener('click', () => {
-    panelOpen = !panelOpen;
-    document.body.classList.toggle('tactic', panelOpen);
-    if (panelOpen) {
+  registerMode('tactic', {
+    label: '🎬 战术',
+    toggleOff: true,
+    enter: () => {
+      panelOpen = true;
+      document.body.classList.add('tactic');
       actorsGroup.visible = true;
       syncAllActors();
       fetchTactics();
-    } else {
+    },
+    exit: () => {
       if (playback) stopPlayback();
+      panelOpen = false;
       currentStepIdx = -1;
+      document.body.classList.remove('tactic');
       actorsGroup.visible = false;
       renderStepChips();
       renderStepEditor();
-    }
+    },
   });
   document.getElementById('tactic-select').addEventListener('change', e => {
     selectTactic(parseInt(e.target.value, 10) || null);
@@ -437,6 +454,54 @@ export function initTactic() {
       console.warn('[tactic] 删除失败', e);
     }
   });
+
+  /* P6 战术包：导出（下载自包含 JSON）/ 导入 */
+  document.getElementById('tactic-export').addEventListener('click', async () => {
+    const t = tactics.find(x => x.id === currentTacticId);
+    if (!t) return;
+    try {
+      const r = await fetch(`/api/tactics/${t.id}/pack`);
+      if (!r.ok) throw new Error(await r.text());
+      const pack = await r.json();
+      const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `战术包-${t.name}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      console.warn('[tactic] 导出失败', e);
+      alert('导出失败：' + e.message);
+    }
+  });
+  document.getElementById('tactic-import').addEventListener('click', () => {
+    document.getElementById('tactic-import-file').click();
+  });
+  document.getElementById('tactic-import-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const pack = JSON.parse(reader.result);
+        const r = await fetch('/api/tactics/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pack),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const t = await r.json();
+        if (t.error) throw new Error(t.error);
+        await fetchTactics();
+        selectTactic(t.id);
+        alert(`已导入战术「${t.name}」（${t.steps.length} 步）`);
+      } catch (err) {
+        alert('导入失败：' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
   document.getElementById('tactic-play').addEventListener('click', () => {
     if (playback) stopPlayback();
     else startPlayback();
@@ -445,9 +510,9 @@ export function initTactic() {
   document.getElementById('step-note').addEventListener('keydown', e => e.stopPropagation());
   document.getElementById('step-duration').addEventListener('keydown', e => e.stopPropagation());
 
-  /* 演员拖拽摆位（board 在编辑态已让路） */
+  /* 演员拖拽摆位（仅战术面板模式激活时响应，互斥由状态机保证） */
   renderer.domElement.addEventListener('pointerdown', e => {
-    if (!isTacticEditing() || calibMode || isUtilityRecording() || e.button !== 0) return;
+    if (getMode() !== 'tactic' || !isTacticEditing() || e.button !== 0) return;
     setBoardPointer(e);
     const hits = boardRaycaster.intersectObjects(actorsGroup.children, true);
     if (!hits.length) return;

@@ -1,9 +1,7 @@
 // @ts-nocheck
 /* ============================================================
- * 常量与规则：材质分类配色/正则、布料过滤关键词、画板标记定义、
- * 标注颜色、投影选区阈值、校准模式鼠标映射
+ * 常量与规则：材质分类配色/正则、布料过滤关键词、画板标记定义
  * ============================================================ */
-import * as THREE from 'three';
 
 /* 纯色材质分类规则（雷达图配色）
  * 按节点名启发式分类；HIDDEN 是编辑器工具网格（游戏内不可见） */
@@ -45,21 +43,4 @@ export const MARKER_DEFS = {
 };
 export const LINE_COLOR = 0xff5252;
 
-/* ---- 点位/区域标注 ---- */
-export const POINT_COLORS = {
-  'A点': '#ffa940', 'B点': '#5aa9ff',
-  '警家': '#7ec8ff', '匪家': '#ff7a3d',
-};
-
-export function pointColor(name) { return POINT_COLORS[name] || '#ffffff'; }
 export const r1 = v => Math.round(v * 10) / 10;
-
-/* ---- 表面贴合投影选区阈值 ---- */
-export const GROUND_NORMAL_MIN = 0.55; // 陡面剔除阈值
-export const FLOOR_WINDOW = 4;         // 楼层过滤窗口（floorY ± 4）
-export const EDGE_DY_MAX = 2.5;        // 相邻采样点高差阈值（超过断开）
-export const REGION_GRID_STEP = 2;     // 栅格采样基础步长
-
-/* ---- 校准模式鼠标映射 ---- */
-export const MOUSE_BROWSE = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-export const MOUSE_CALIB = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: null };

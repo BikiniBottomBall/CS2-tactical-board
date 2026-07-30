@@ -1,10 +1,11 @@
 """CS2 战术板后端（FastAPI 版，取代 server.py）
 
-静态文件 + annotations CRUD + JSON 备份导入导出
+静态文件 + 道具/战术/demo REST API + JSON 备份导入导出 + 对齐校验图写盘
 启动：.venv\\Scripts\\uvicorn app:app --host 127.0.0.1 --port 8000
 文档：http://localhost:8000/docs
 """
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -13,14 +14,13 @@ import subprocess
 import sys
 from datetime import datetime
 
-from fastapi import Body, FastAPI, File, UploadFile
+from fastapi import Body, FastAPI, File, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, SQLModel, select
 
 from models import Annotation, DemoEvent, Match, Tactic, TacticStep, Utility, engine
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-LEGACY_JSON = os.path.join(ROOT, 'positions.json')
 
 app = FastAPI(title='CS2 战术板 API', version='1.0.0')
 
@@ -73,45 +73,9 @@ def replace_all_annotations(data: dict):
         db.commit()
 
 
-def migrate_legacy_json():
-    """老 positions.json 自动迁移（仅当库为空）"""
-    with Session(engine) as db:
-        count = len(db.exec(select(Annotation)).all())
-        if count > 0 or not os.path.exists(LEGACY_JSON):
-            return
-        try:
-            with open(LEGACY_JSON, encoding='utf-8') as f:
-                data = json.load(f)
-            if isinstance(data, dict) and data:
-                replace_all_annotations(data)
-                print(f'[db] 已从 positions.json 迁移 {len(data)} 条标注')
-        except Exception as e:
-            print(f'[db] positions.json 迁移失败: {e}')
-
-
 @app.on_event('startup')
 def startup():
     SQLModel.metadata.create_all(engine)  # 新库建表；老库由 Alembic 管迁移
-    migrate_legacy_json()
-
-
-@app.get('/api/annotations')
-def get_annotations():
-    return load_all_annotations()
-
-
-@app.post('/api/annotations')
-def save_annotations(data: dict = Body(...)):
-    if not isinstance(data, dict):
-        return {'error': 'annotations must be a JSON object'}
-    replace_all_annotations(data)
-    return {'ok': True}
-
-
-@app.post('/positions.json')
-def save_legacy(data: dict = Body(...)):
-    """旧接口兼容"""
-    return save_annotations(data)
 
 
 # ---- utilities 道具库 CRUD ----
@@ -257,6 +221,124 @@ def delete_tactic(tid: int):
         db.delete(t)
         db.commit()
         return {'ok': True}
+
+
+# ---- P6 战术包：自包含导出/导入（道具按内容哈希去重） ----
+def utility_content_hash(u: Utility) -> str:
+    """道具内容指纹：同一份 lineup 在不同库中哈希一致"""
+    payload = {
+        'name': u.name, 'type': u.type, 'throw_type': u.throw_type,
+        'stand_x': u.stand_x, 'stand_y': u.stand_y, 'stand_z': u.stand_z,
+        'landing_x': u.landing_x, 'landing_y': u.landing_y, 'landing_z': u.landing_z,
+        'landing_point': u.landing_point, 'trajectory': u.trajectory,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode('utf-8')
+    ).hexdigest()[:16]
+
+
+@app.get('/api/tactics/{tid}/pack')
+def export_tactic_pack(tid: int):
+    with Session(engine) as db:
+        t = db.get(Tactic, tid)
+        if not t:
+            return {'error': 'not found'}
+        steps = [step_to_dict(s) for s in get_tactic_steps(db, tid)]
+
+        # 收集步骤引用的道具与标注，全部内嵌（自包含）
+        util_ids = sorted({uid for s in steps for uid in (s.get('utility_ids') or [])})
+        utils = []
+        ann_names = set()
+        for uid in util_ids:
+            u = db.get(Utility, uid)
+            if not u:
+                continue
+            d = u.model_dump()
+            d['content_hash'] = utility_content_hash(u)
+            utils.append(d)
+            if u.landing_point:
+                ann_names.add(u.landing_point)
+        for s in steps:
+            if s.get('annotation'):
+                ann_names.add(s['annotation'])
+        anns = [row_to_ann(r) for r in db.exec(select(Annotation)).all()
+                if r.name in ann_names]
+        for a in anns:
+            a['_name'] = a.pop('name')
+
+        return {
+            'format': 'cs2-tactic-pack',
+            'version': 1,
+            'exported_at': datetime.now().isoformat(timespec='seconds'),
+            'tactic': {'name': t.name, 'description': t.description},
+            'steps': steps,
+            'utilities': utils,
+            'annotations': anns,
+        }
+
+
+@app.post('/api/tactics/import')
+def import_tactic_pack(pack: dict = Body(...)):
+    if pack.get('format') != 'cs2-tactic-pack':
+        return {'error': 'not a cs2-tactic-pack'}
+
+    with Session(engine) as db:
+        # 1) 标注：缺的补（按名字）
+        existing = {r.name for r in db.exec(select(Annotation)).all()}
+        for a in pack.get('annotations') or []:
+            name = a.pop('_name', None)
+            if name and name not in existing:
+                db.add(Annotation(**ann_to_params(name, a)))
+
+        # 2) 道具：按内容哈希去重，建立 旧id -> 新id 映射
+        existing_utils = db.exec(select(Utility)).all()
+        hash_to_id = {utility_content_hash(u): u.id for u in existing_utils}
+        id_map = {}
+        for d in pack.get('utilities') or []:
+            old_id = d.pop('id', None)
+            ch = d.pop('content_hash', None)
+            d.pop('created_at', None)
+            if ch and ch in hash_to_id:
+                id_map[old_id] = hash_to_id[ch]
+                continue
+            params = {k: v for k, v in d.items() if k in UTILITY_FIELDS}
+            u = Utility(**params)
+            u.created_at = datetime.now().isoformat(timespec='seconds')
+            db.add(u)
+            db.commit()
+            db.refresh(u)
+            id_map[old_id] = u.id
+            hash_to_id[ch or utility_content_hash(u)] = u.id
+
+        # 3) 战术：重名自动加后缀，步骤里的 utility_ids 重映射
+        base = (pack.get('tactic') or {}).get('name') or '导入战术'
+        name = base
+        names = {t.name for t in db.exec(select(Tactic)).all()}
+        n = 2
+        while name in names:
+            name = f'{base}({n})'
+            n += 1
+        t = Tactic(name=name, description=(pack.get('tactic') or {}).get('description'),
+                   created_at=datetime.now().isoformat(timespec='seconds'))
+        db.add(t)
+        db.commit()
+        db.refresh(t)
+
+        for i, s in enumerate(pack.get('steps') or []):
+            uids = [id_map.get(uid) for uid in (s.get('utility_ids') or [])]
+            uids = [uid for uid in uids if uid is not None]
+            db.add(TacticStep(
+                tactic_id=t.id,
+                step_order=s.get('step_order', i),
+                annotation=s.get('annotation'),
+                utility_id=s.get('utility_id'),
+                note=s.get('note'),
+                actors=json.dumps(s['actors'], ensure_ascii=False) if s.get('actors') is not None else None,
+                utility_ids=json.dumps(uids, ensure_ascii=False),
+                duration=s.get('duration', 2.0),
+            ))
+        db.commit()
+        return tactic_to_dict(t, get_tactic_steps(db, t.id))
 
 
 # ---- demos 回放（P7） ----
@@ -407,6 +489,18 @@ def import_all(data: dict = Body(...)):
                 db.add(model(**row))
         db.commit()
     return {'ok': True}
+
+
+@app.post('/api/export-align')
+async def export_align(request: Request):
+    """对齐校验图：前端画布 PNG 写盘到项目根目录 check_align.png"""
+    data = await request.body()
+    if not data:
+        return {'error': 'empty body'}
+    out = os.path.join(ROOT, 'check_align.png')
+    with open(out, 'wb') as f:
+        f.write(data)
+    return {'ok': True, 'path': 'check_align.png', 'bytes': len(data)}
 
 
 # 静态文件必须最后挂载（API 路由优先）

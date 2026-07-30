@@ -11,7 +11,8 @@ import { COLORS, categorize, matchClothKeyword } from './config';
 import { scene, controls, mapBounds, setMapGroup, setMapBounds, setCollisionMesh } from './state';
 import { resetCamera, setTopView } from './camera';
 import { restoreBoard } from './board';
-import { loadPositions, renderPositionLabels } from './calib';
+import { buildGrid } from './grid';
+import { buildRefmap } from './refmap';
 
 export function loadMap() {
   const bar = document.getElementById('load-bar');
@@ -135,7 +136,8 @@ function onMapReady() {
   controls.maxDistance = mapBounds.getSize(new THREE.Vector3()).length() * 2;
   resetCamera();
   restoreBoard(); // 恢复上次保存的标记和线条
-  loadPositions().then(renderPositionLabels); // 点位标注（positions.json）
+  buildGrid();      // 坐标网格叠加层（正俯视+开关时显示）
+  buildRefmap();    // 参考图对照层（正俯视+开关时显示）
   window.__mapReady = true; // e2e 就绪信号
 
   // 正俯视截图模式（?shot=1）

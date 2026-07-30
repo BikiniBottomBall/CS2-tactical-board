@@ -24,9 +24,9 @@
   }
 
   #panel-top {
-    top: 16px; left: 16px;
-    padding: 14px 18px;
-    min-width: 220px;
+    top: 16px; left: 196px;
+    padding: 10px 16px;
+    min-width: 200px;
   }
   #panel-top h1 { font-size: 16px; font-weight: 600; letter-spacing: 1px; color: #f0f4f8; }
   #panel-top h1 span { color: #ffa940; }
@@ -57,47 +57,9 @@
 
   /* 截图模式：隐藏全部 UI */
   body.shot .glass-panel,
-  body.shot #btn-topview { display: none !important; }
+  body.shot #mode-badge { display: none !important; }
 
-  /* ===== 视角按钮 ===== */
-  #btn-topview {
-    position: fixed;
-    top: 16px; right: 16px;
-    padding: 10px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    font-family: inherit;
-    color: #0d1219;
-    background: #ffa940;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.15s;
-    z-index: 10;
-  }
-  #btn-topview:hover { background: #ffb85c; }
-
-  /* ===== 标点校准模式 ===== */
-  #btn-calib {
-    position: fixed;
-    top: 64px; right: 16px;
-    padding: 10px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    color: #c8d2dd;
-    background: rgba(16, 22, 32, 0.55);
-    backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    cursor: pointer;
-    z-index: 10;
-  }
-  #btn-calib:hover { background: rgba(40, 50, 65, 0.75); }
-  body.calib #btn-calib { color: #0d1219; background: #ffa940; border-color: #ffa940; }
-  body.calib canvas { cursor: crosshair; }
-
-  /* 当前模式指示徽章（顶部居中，防止搞混标点/转镜头） */
+  /* 当前模式指示徽章（顶部居中） */
   #mode-badge {
     position: fixed;
     top: 16px; left: 50%;
@@ -113,166 +75,61 @@
     backdrop-filter: blur(14px);
     border: 1px solid rgba(255, 255, 255, 0.12);
   }
-  body.calib #mode-badge {
+  #mode-badge.active {
     color: #0d1219;
     font-weight: 600;
     background: #ffa940;
     border-color: #ffa940;
   }
-  body.shot #mode-badge { display: none !important; }
 
-  #panel-calib {
-    top: 108px; right: 16px;
-    width: 250px;
-    padding: 12px 14px;
-    display: none;
-  }
-  body.calib #panel-calib { display: block; }
-  body.shot #btn-calib, body.shot #panel-calib { display: none !important; }
-  .calib-title { font-size: 13px; font-weight: 600; color: #f0f4f8; margin-bottom: 4px; }
-  .calib-hint { font-size: 11px; color: #8b98a8; margin-bottom: 8px; line-height: 1.5; }
-  #calib-coords { font-size: 12px; color: #ffa940; margin-bottom: 8px; font-family: Consolas, monospace; }
-  .calib-row { display: flex; gap: 6px; }
-  #calib-name {
-    flex: 1;
-    padding: 7px 8px;
-    font-size: 12px;
-    font-family: inherit;
-    color: #dfe6ee;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 8px;
-    outline: none;
-  }
-  #calib-save {
-    padding: 7px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    color: #0d1219;
-    background: #ffa940;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  #calib-list { margin-top: 10px; max-height: 220px; overflow-y: auto; }
-  .calib-modes { display: flex; gap: 6px; margin-bottom: 8px; }
-  .calib-modes button {
-    flex: 1;
-    padding: 6px 0;
-    font-size: 12px;
-    font-family: inherit;
-    color: #c8d2dd;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .calib-modes button.active { color: #0d1219; font-weight: 600; background: #ffa940; border-color: #ffa940; }
-  #calib-layer { font-size: 11px; color: #7ec8ff; margin-bottom: 6px; min-height: 14px; }
-  #calib-height-row { align-items: center; margin-bottom: 8px; }
-  #calib-height-row button {
-    width: 28px; padding: 4px 0;
-    font-size: 14px; font-weight: 600;
-    color: #c8d2dd;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  #calib-height-row button:hover { background: rgba(255,255,255,0.14); }
-  #calib-height { flex: 1; text-align: center; font-size: 11px; color: #8b98a8; }
-  #calib-parent {
-    max-width: 84px;
-    padding: 7px 4px;
-    font-size: 11px;
-    font-family: inherit;
-    color: #dfe6ee;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 8px;
-    outline: none;
-  }
-  #calib-parent option { background: #101620; }
-  .calib-mini-btn {
-    flex: 1;
-    padding: 5px 0;
-    font-size: 11px;
-    font-family: inherit;
-    color: #c8d2dd;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .calib-mini-btn:hover { background: rgba(255,255,255,0.14); }
-  .calib-style-editor {
-    padding: 6px 8px;
-    margin: 2px 0 6px 14px;
-    border-left: 2px solid rgba(255,169,64,0.4);
+  /* ===== 左侧侧边栏（可折叠：收起仅图标） ===== */
+  #sidebar {
+    top: 16px; left: 16px;
+    bottom: 16px;
+    width: 168px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
+    overflow-y: auto;
+    z-index: 10;
+    transition: width 0.15s;
   }
-  .style-field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 11px;
+  #sidebar.collapsed { width: 52px; }
+  #sidebar.collapsed .sb-txt,
+  #sidebar.collapsed .sb-title,
+  #sidebar.collapsed .sb-field input,
+  #sidebar.collapsed .sb-field select,
+  #sidebar.collapsed .sb-nudge { display: none; }
+
+  #sidebar-toggle {
+    align-self: flex-end;
+    padding: 2px 8px;
+    font-size: 13px;
+    font-family: inherit;
     color: #8b98a8;
-  }
-  .style-field input[type="color"] {
-    width: 26px; height: 18px;
-    padding: 0;
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 4px;
     background: none;
+    border: none;
+    border-radius: 6px;
     cursor: pointer;
   }
-  .style-field input[type="range"] { flex: 1; accent-color: #ffa940; }
-  .scale-row {
+  #sidebar-toggle:hover { color: #ffa940; background: rgba(255,255,255,0.08); }
+
+  .sb-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 0;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+  .sb-group:first-of-type { border-top: none; }
+  .sb-title { font-size: 10px; color: #6b7888; letter-spacing: 2px; padding: 0 4px 2px; }
+
+  #sidebar button {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 8px;
-    font-size: 11px;
-    color: #8b98a8;
-  }
-  .scale-row input { flex: 1; accent-color: #ffa940; }
-  .calib-font-btn {
-    background: none; border: none; color: #8b98a8;
-    font-size: 11px; cursor: pointer; padding: 0 2px;
-  }
-  .calib-font-btn:hover { color: #ffa940; }
-  .calib-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: #c8d2dd;
-    padding: 4px 2px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-  }
-  .calib-item .calib-type { font-size: 10px; color: #6b7888; }
-  .calib-item .calib-xyz { color: #6b7888; font-size: 10px; font-family: Consolas, monospace; margin-left: auto; }
-  .calib-item button {
-    background: none; border: none; color: #8b98a8;
-    font-size: 14px; cursor: pointer; padding: 0 4px;
-  }
-  .calib-item button:hover { color: #ff5252; }
-
-  /* ===== 左侧工具栏 ===== */
-  #toolbar {
-    top: 50%; left: 16px;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 10px;
-    width: 108px;
-  }
-  #toolbar button {
-    padding: 8px 0;
+    padding: 7px 8px;
     font-size: 12px;
     font-family: inherit;
     color: #c8d2dd;
@@ -281,43 +138,54 @@
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s;
+    white-space: nowrap;
   }
-  #toolbar button:hover { background: rgba(255, 255, 255, 0.14); }
-  #toolbar button.active {
+  #sidebar button:hover { background: rgba(255, 255, 255, 0.14); }
+  #sidebar button.active {
     color: #0d1219;
     font-weight: 600;
     background: #ffa940;
     border-color: #ffa940;
   }
-  #toolbar .tb-sep { height: 1px; background: rgba(255,255,255,0.1); margin: 2px 0; }
-  #toolbar .tb-dot {
+  #sidebar.collapsed button { justify-content: center; padding: 7px 0; }
+  .sb-ico { font-size: 13px; width: 16px; text-align: center; flex: none; }
+  .tb-dot {
     display: inline-block;
-    width: 8px; height: 8px;
+    width: 10px; height: 10px;
     border-radius: 50%;
-    margin-right: 5px;
-    vertical-align: 1px;
   }
+
+  .sb-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: #8b98a8;
+  }
+  .sb-field input[type="range"] { flex: 1; min-width: 0; accent-color: #ffa940; }
+  .sb-field select {
+    flex: 1; min-width: 0;
+    padding: 3px 4px;
+    font-size: 11px;
+    font-family: inherit;
+    color: #dfe6ee;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    outline: none;
+  }
+  .sb-field select option { background: #101620; }
+
+  .sb-nudge {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding: 2px 4px;
+  }
+  .sb-nudge button { justify-content: center; padding: 4px 0 !important; }
 
   /* ===== 道具库 ===== */
-  #btn-utility {
-    position: fixed;
-    top: 112px; right: 16px;
-    padding: 10px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    color: #c8d2dd;
-    background: rgba(16, 22, 32, 0.55);
-    backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    cursor: pointer;
-    z-index: 10;
-  }
-  #btn-utility:hover { background: rgba(40, 50, 65, 0.75); }
-  body.utility #btn-utility { color: #0d1219; background: #ffa940; border-color: #ffa940; }
-  body.shot #btn-utility, body.shot #panel-utility { display: none !important; }
-
   #panel-utility {
     right: 16px; bottom: 16px;
     width: 260px;
@@ -332,7 +200,6 @@
     margin: 8px 0 2px;
     letter-spacing: 1px;
   }
-  .util-item { align-items: center; }
   .util-item .util-name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .util-item.selected .util-name { color: #ffa940; font-weight: 600; }
   .util-item .util-throw { font-size: 10px; color: #6b7888; }
@@ -344,25 +211,6 @@
   .util-step-btns button.active { color: #0d1219; font-weight: 600; background: #ffa940; border-color: #ffa940; }
 
   /* ===== 战术时间轴 ===== */
-  #btn-tactic {
-    position: fixed;
-    top: 160px; right: 16px;
-    padding: 10px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    color: #c8d2dd;
-    background: rgba(16, 22, 32, 0.55);
-    backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    cursor: pointer;
-    z-index: 10;
-  }
-  #btn-tactic:hover { background: rgba(40, 50, 65, 0.75); }
-  body.tactic #btn-tactic { color: #0d1219; background: #ffa940; border-color: #ffa940; }
-  body.shot #btn-tactic, body.shot #panel-tactic { display: none !important; }
-
   #panel-tactic {
     left: 50%; bottom: 16px;
     transform: translateX(-50%);
@@ -460,27 +308,8 @@
   }
 
   /* ===== Demo 回放 ===== */
-  #btn-demo {
-    position: fixed;
-    top: 208px; right: 16px;
-    padding: 10px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    color: #c8d2dd;
-    background: rgba(16, 22, 32, 0.55);
-    backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    cursor: pointer;
-    z-index: 10;
-  }
-  #btn-demo:hover { background: rgba(40, 50, 65, 0.75); }
-  body.demo #btn-demo { color: #0d1219; background: #ffa940; border-color: #ffa940; }
-  body.shot #btn-demo, body.shot #panel-demo { display: none !important; }
-
   #panel-demo {
-    top: 252px; right: 16px;
+    top: 16px; right: 16px;
     width: 300px;
     padding: 12px 14px;
     display: none;
@@ -488,7 +317,6 @@
     overflow-y: auto;
   }
   body.demo #panel-demo { display: block; }
-  .demo-item { align-items: center; }
   .demo-item .demo-name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .demo-item.selected .demo-name { color: #ffa940; font-weight: 600; }
   .demo-item .demo-meta { font-size: 10px; color: #6b7888; }
@@ -510,6 +338,83 @@
   }
   .bookmark-dot:hover { transform: translateX(-50%) scale(1.5); }
   #replay-slider { width: 100%; accent-color: #ffa940; }
+
+  /* ===== 共享小组件样式（道具/demo 面板沿用） ===== */
+  .calib-title { font-size: 13px; font-weight: 600; color: #f0f4f8; margin-bottom: 4px; }
+  .calib-hint { font-size: 11px; color: #8b98a8; margin-bottom: 8px; line-height: 1.5; }
+  .calib-row { display: flex; gap: 6px; }
+  #utility-coords { font-size: 12px; color: #ffa940; margin-bottom: 8px; font-family: Consolas, monospace; }
+  .calib-modes { display: flex; gap: 6px; margin-bottom: 8px; }
+  .calib-modes button {
+    flex: 1;
+    padding: 6px 0;
+    font-size: 12px;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .calib-modes button.active { color: #0d1219; font-weight: 600; background: #ffa940; border-color: #ffa940; }
+  #utility-layer { font-size: 11px; color: #7ec8ff; margin-bottom: 6px; min-height: 14px; }
+  #utility-height-row { align-items: center; margin-bottom: 8px; }
+  #utility-height-row button {
+    width: 28px; padding: 4px 0;
+    font-size: 14px; font-weight: 600;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  #utility-height-row button:hover { background: rgba(255,255,255,0.14); }
+  #utility-height { flex: 1; text-align: center; font-size: 11px; color: #8b98a8; }
+  #utility-name {
+    flex: 1;
+    padding: 7px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #dfe6ee;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    outline: none;
+  }
+  #utility-save {
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #0d1219;
+    background: #ffa940;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .calib-mini-btn {
+    flex: 1;
+    padding: 5px 0;
+    font-size: 11px;
+    font-family: inherit;
+    color: #c8d2dd;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .calib-mini-btn:hover { background: rgba(255,255,255,0.14); }
+  .calib-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #c8d2dd;
+    padding: 4px 2px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .calib-item .calib-type { font-size: 10px; color: #6b7888; }
+  .calib-item .calib-xyz { color: #6b7888; font-size: 10px; font-family: Consolas, monospace; margin-left: auto; }
 </style>
 </head>
 <body>
@@ -518,49 +423,77 @@
 <div id="panel-top" class="glass-panel">
   <h1>CS2 <span>战术板</span></h1>
   <div class="subtitle">de_dust2 · 官方地图模型</div>
-  <div class="subtitle" style="margin-top:6px;color:#6b7888">WASD 移动 · PgUp/PgDn 升降 · Shift 加速 · R 复位<br>左键旋转 · 右键平移 · 滚轮缩放 · Q 校准模式</div>
-  <div class="scale-row">标记大小 <input type="range" id="marker-scale" min="0.5" max="2" step="0.1"></div>
-  <div class="scale-row">画质
-    <select id="sel-quality" style="flex:1;background:rgba(255,255,255,0.06);color:#dfe6ee;border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:3px 4px;font-family:inherit">
+  <div class="subtitle" style="margin-top:6px;color:#6b7888">WASD 移动 · PgUp/PgDn 升降 · Shift 加速 · R 复位<br>左键旋转 · 右键平移 · 滚轮缩放 · Esc 退出工具</div>
+</div>
+
+<div id="mode-badge">👁 浏览模式</div>
+
+<!-- ===== 左侧侧边栏 ===== -->
+<div id="sidebar" class="glass-panel">
+  <button id="sidebar-toggle" title="收起/展开">«</button>
+
+  <div class="sb-group">
+    <div class="sb-title">视角</div>
+    <button id="btn-view-browse"><span class="sb-ico">👁</span><span class="sb-txt">浏览模式</span></button>
+    <button id="btn-view-top"><span class="sb-ico">⬇</span><span class="sb-txt">正俯视</span></button>
+    <button id="btn-view-45"><span class="sb-ico">↩</span><span class="sb-txt">斜 45°</span></button>
+  </div>
+
+  <div class="sb-group">
+    <div class="sb-title">标记</div>
+    <button data-mode="marker-t"><span class="sb-ico tb-dot" style="background:#ff7a3d"></span><span class="sb-txt">T 标记</span></button>
+    <button data-mode="marker-ct"><span class="sb-ico tb-dot" style="background:#5aa9ff"></span><span class="sb-txt">CT 标记</span></button>
+    <button data-mode="smoke"><span class="sb-ico tb-dot" style="background:#9aa5ad"></span><span class="sb-txt">烟雾弹</span></button>
+    <button data-mode="flash"><span class="sb-ico tb-dot" style="background:#ffe082"></span><span class="sb-txt">闪光弹</span></button>
+    <button data-mode="molotov"><span class="sb-ico tb-dot" style="background:#ff7043"></span><span class="sb-txt">燃烧弹</span></button>
+  </div>
+
+  <div class="sb-group">
+    <div class="sb-title">编辑</div>
+    <button data-mode="select"><span class="sb-ico">➤</span><span class="sb-txt">选择移动</span></button>
+    <button data-mode="brush"><span class="sb-ico">✏</span><span class="sb-txt">画笔</span></button>
+    <button data-mode="eraser"><span class="sb-ico">⌫</span><span class="sb-txt">橡皮擦</span></button>
+    <button id="btn-undo"><span class="sb-ico">↶</span><span class="sb-txt">撤销</span></button>
+    <button id="btn-clear"><span class="sb-ico">🗑</span><span class="sb-txt">清空</span></button>
+  </div>
+
+  <div class="sb-group">
+    <div class="sb-title">数据</div>
+    <button data-mode="utility"><span class="sb-ico">🧨</span><span class="sb-txt">道具库</span></button>
+    <button data-mode="tactic"><span class="sb-ico">🎬</span><span class="sb-txt">战术</span></button>
+    <button data-mode="demo"><span class="sb-ico">📼</span><span class="sb-txt">Demo</span></button>
+  </div>
+
+  <div class="sb-group">
+    <div class="sb-title">设置</div>
+    <div class="sb-field" title="标记大小"><span class="sb-ico">🔍</span><input type="range" id="marker-scale" min="0.5" max="2" step="0.1"><span class="sb-txt">标记</span></div>
+    <div class="sb-field" title="画质"><span class="sb-ico">🖥</span><select id="sel-quality">
       <option value="smooth">流畅</option>
       <option value="balanced">均衡</option>
       <option value="quality">画质</option>
-    </select>
+    </select></div>
+  </div>
+
+  <div class="sb-group">
+    <div class="sb-title">对齐</div>
+    <button id="btn-grid"><span class="sb-ico">🔲</span><span class="sb-txt">坐标网格</span></button>
+    <button id="btn-refmap"><span class="sb-ico">🗺</span><span class="sb-txt">参考图</span></button>
+    <div class="sb-field" title="参考图透明度"><span class="sb-ico">◐</span><input type="range" id="refmap-opacity" min="0" max="100" step="5" value="50"></div>
+    <div class="sb-nudge" title="参考图对齐微调">
+      <button id="refmap-left">←</button>
+      <button id="refmap-right">→</button>
+      <button id="refmap-up">↑</button>
+      <button id="refmap-down">↓</button>
+      <button id="refmap-zoomin">＋</button>
+      <button id="refmap-zoomout">－</button>
+      <button id="refmap-rot" title="旋转 90°">⟳</button>
+      <button id="refmap-reset" title="重置对齐">↺</button>
+    </div>
+    <button id="btn-export-align"><span class="sb-ico">📷</span><span class="sb-txt">导出校验图</span></button>
   </div>
 </div>
 
-<button id="btn-topview">⬇ 正俯视视角</button>
-<button id="btn-calib">🎯 标点校准</button>
-<div id="mode-badge">👁 浏览模式（Q 切换校准）</div>
-
-<div id="panel-calib" class="glass-panel">
-  <div class="calib-title">标点校准模式</div>
-  <div class="calib-hint">点标记：左键取点（Tab 切层，+/- 调高度）<br>区域圈地：左键连续放顶点，回车/点起点闭合<br>Ctrl+Z 撤销顶点 · Esc 取消<br>镜头：Alt+左键旋转 · 中键或空格+左键平移 · 滚轮缩放</div>
-  <div class="calib-modes">
-    <button id="calib-mode-point" class="active">点标记</button>
-    <button id="calib-mode-region">区域圈地</button>
-  </div>
-  <div id="calib-layer"></div>
-  <div id="calib-coords">坐标：点击地图取点</div>
-  <div class="calib-row" id="calib-height-row">
-    <button id="calib-hminus" title="降低高度">−</button>
-    <span id="calib-height">高度微调 0</span>
-    <button id="calib-hplus" title="升高高度">+</button>
-  </div>
-  <div class="calib-row">
-    <input id="calib-name" placeholder="名称（如 A点 / A大）">
-    <select id="calib-parent"><option value="">无父级</option></select>
-    <button id="calib-save">保存</button>
-  </div>
-  <div class="calib-row" style="margin-top:6px">
-    <button id="calib-export" class="calib-mini-btn">导出备份</button>
-    <button id="calib-import" class="calib-mini-btn">导入备份</button>
-    <input type="file" id="calib-import-file" accept=".json" hidden>
-  </div>
-  <div id="calib-list"></div>
-</div>
-
-<button id="btn-utility">🧨 道具库</button>
+<!-- ===== 道具库面板 ===== -->
 <div id="panel-utility" class="glass-panel">
   <div class="calib-title">道具库</div>
   <div id="utility-list"></div>
@@ -597,7 +530,7 @@
   </div>
 </div>
 
-<button id="btn-demo">📼 Demo</button>
+<!-- ===== Demo 回放面板 ===== -->
 <div id="panel-demo" class="glass-panel">
   <div class="calib-title">Demo 回放</div>
   <div id="demo-list"></div>
@@ -618,13 +551,16 @@
   </div>
 </div>
 
-<button id="btn-tactic">🎬 战术</button>
+<!-- ===== 战术时间轴面板 ===== -->
 <div id="panel-tactic" class="glass-panel">
   <div class="tactic-row">
     <select id="tactic-select"></select>
     <button id="tactic-new" title="新建战术">＋</button>
     <button id="tactic-rename" title="改名">✎</button>
     <button id="tactic-delete" title="删除战术">×</button>
+    <button id="tactic-export" title="导出战术包（自包含 JSON）">⬇</button>
+    <button id="tactic-import" title="导入战术包">⬆</button>
+    <input type="file" id="tactic-import-file" accept=".json" hidden>
     <span style="flex:1"></span>
     <button id="tactic-play">▶ 播放</button>
   </div>
@@ -641,24 +577,6 @@
       <span id="step-save-hint" class="calib-hint" style="margin:0"></span>
     </div>
   </div>
-</div>
-
-<div id="toolbar" class="glass-panel">
-  <button data-tool="select" class="active">选择/移动</button>
-  <button data-tool="brush">画笔</button>
-  <div class="tb-sep"></div>
-  <button data-tool="marker-t"><span class="tb-dot" style="background:#ff7a3d"></span>T 标记</button>
-  <button data-tool="marker-ct"><span class="tb-dot" style="background:#5aa9ff"></span>CT 标记</button>
-  <div class="tb-sep"></div>
-  <button data-tool="smoke"><span class="tb-dot" style="background:#9aa5ad"></span>烟雾弹</button>
-  <button data-tool="flash"><span class="tb-dot" style="background:#ffe082"></span>闪光弹</button>
-  <button data-tool="molotov"><span class="tb-dot" style="background:#ff7043"></span>燃烧弹</button>
-  <div class="tb-sep"></div>
-  <button data-tool="eraser">橡皮擦</button>
-  <button id="btn-undo">撤销</button>
-  <button id="btn-clear">清空</button>
-  <div class="tb-sep"></div>
-  <button id="btn-tb-topview">正俯视</button>
 </div>
 
 <div id="loading" class="glass-panel">
