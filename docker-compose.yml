@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cs2-pg
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: cs2user
+      POSTGRES_PASSWORD: cs2pass
+      POSTGRES_DB: cs2tactical
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -9,6 +9,12 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
+# BOARD_DB_URL 环境变量覆盖（SQLite ↔ PostgreSQL 无缝切换）
+import os as _os
+_board_url = _os.environ.get('BOARD_DB_URL')
+if _board_url:
+    config.set_main_option('sqlalchemy.url', _board_url)
+
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
@@ -40,7 +46,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = os.environ.get('BOARD_DB_URL') or config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
