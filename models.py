@@ -112,3 +112,13 @@ class ModelRecord(SQLModel, table=True):
     size_bytes: Optional[int] = None
     bbox: Optional[str] = None             # JSON: 归一化包围盒
     created_at: Optional[str] = None
+
+
+class ShareLink(SQLModel, table=True):
+    """战术板分享链接（P8）"""
+    __tablename__ = 'share_links'
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    share_id: str = Field(index=True, unique=True)   # uuid4 hex[:8]，唯一
+    tactic_data: Optional[str] = None                 # JSON 字符串：完整战术包
+    created_at: Optional[str] = None

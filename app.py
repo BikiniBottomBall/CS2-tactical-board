@@ -12,13 +12,14 @@ import re
 import shutil
 import subprocess
 import sys
+import uuid
 from datetime import datetime
 
 from fastapi import Body, FastAPI, File, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, SQLModel, select
 
-from models import Annotation, DemoEvent, Match, Tactic, TacticStep, Utility, engine
+from models import Annotation, DemoEvent, Match, ShareLink, Tactic, TacticStep, Utility, engine
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -339,6 +340,37 @@ def import_tactic_pack(pack: dict = Body(...)):
             ))
         db.commit()
         return tactic_to_dict(t, get_tactic_steps(db, t.id))
+
+
+# ---- 战术板分享链接（P8） ----
+
+@app.post('/api/share')
+def create_share(data: dict = Body(...)):
+    """创建战术板分享链接，返回 share_id"""
+    with Session(engine) as db:
+        for _ in range(3):
+            sid = uuid.uuid4().hex[:8]
+            existing = db.get(ShareLink, sid)
+            if not existing:
+                break
+        sl = ShareLink(
+            share_id=sid,
+            tactic_data=json.dumps(data, ensure_ascii=False),
+            created_at=datetime.now().isoformat(timespec='seconds'),
+        )
+        db.add(sl)
+        db.commit()
+        return {'share_id': sid}
+
+
+@app.get('/api/share/{share_id}')
+def get_share(share_id: str):
+    """按 share_id 获取完整战术包"""
+    with Session(engine) as db:
+        sl = db.get(ShareLink, share_id)
+        if not sl:
+            return {'error': 'not found'}
+        return json.loads(sl.tactic_data)
 
 
 # ---- demos 回放（P7） ----
