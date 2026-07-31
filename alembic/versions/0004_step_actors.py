@@ -15,7 +15,7 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    existing = {r[1] for r in bind.execute(sa.text('PRAGMA table_info(tactic_steps)')).fetchall()}
+    existing = {c['name'] for c in sa.inspect(bind).get_columns('tactic_steps')}
     if 'actors' not in existing:
         op.add_column('tactic_steps', sa.Column('actors', sa.Text(), nullable=True))
     if 'utility_ids' not in existing:

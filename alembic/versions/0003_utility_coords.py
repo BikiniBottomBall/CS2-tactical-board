@@ -17,7 +17,7 @@ NEW_COLS = ('stand_x', 'stand_y', 'stand_z', 'landing_x', 'landing_y', 'landing_
 
 def upgrade() -> None:
     bind = op.get_bind()
-    existing = {r[1] for r in bind.execute(sa.text('PRAGMA table_info(utilities)')).fetchall()}
+    existing = {c['name'] for c in sa.inspect(bind).get_columns('utilities')}
     for col in NEW_COLS:
         if col not in existing:
             op.add_column('utilities', sa.Column(col, sa.Float(), nullable=True))
