@@ -23,6 +23,15 @@ export let mapBounds = null;      // 模型实际包围盒（归一化后）
 export let collisionMesh = null;  // 地面碰撞层（仅 map-ground，区域投影只打它，忽略树/栏杆/箱子）
 export const flyClock = new THREE.Clock();
 
+/* ---- P9 多人协同 ---- */
+export let isMultiplayer = false;
+export let myUserId: string | null = null;
+export let roomCode: string | null = null;
+
+export function setMultiplayer(v: boolean): void { isMultiplayer = v; }
+export function setMyUserId(v: string | null): void { myUserId = v; }
+export function setRoomCode(v: string | null): void { roomCode = v; }
+
 export function setCore(s, c, r, ctl) { scene = s; camera = c; renderer = r; controls = ctl; }
 export function setMapGroup(g) { mapGroup = g; }
 export function setMapBounds(b) { mapBounds = b; }

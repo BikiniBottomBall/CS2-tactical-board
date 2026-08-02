@@ -465,6 +465,21 @@
 
 <div id="mode-badge">👁 浏览模式</div>
 
+<!-- ===== 多人协同面板 ===== -->
+<div id="room-panel" class="glass-panel" style="top:16px;right:196px;padding:8px 12px;font-size:12px;z-index:10;display:none;">
+  <div id="room-controls" style="display:flex;gap:6px;align-items:center;">
+    <button id="btn-room-create" class="calib-mini-btn" style="flex:0 0 auto;padding:5px 10px;">创建房间</button>
+    <input id="room-code-input" placeholder="房间码" maxlength="6" style="width:72px;padding:5px 6px;font-size:12px;font-family:inherit;color:#dfe6ee;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);border-radius:8px;outline:none;text-transform:uppercase;">
+    <button id="btn-room-join" class="calib-mini-btn" style="flex:0 0 auto;padding:5px 10px;">加入</button>
+  </div>
+  <div id="room-info" style="display:none;align-items:center;gap:10px;">
+    <span id="room-code-display" style="color:#ffa940;font-family:Consolas,monospace;"></span>
+    <span id="room-players" style="color:#8b98a8;"></span>
+    <button id="btn-room-copy" class="calib-mini-btn" style="padding:3px 8px;font-size:10px;">复制码</button>
+    <button id="btn-room-leave" class="calib-mini-btn" style="padding:3px 8px;font-size:10px;color:#ff5252;">断开</button>
+  </div>
+</div>
+
 <!-- ===== 左侧侧边栏 ===== -->
 <div id="sidebar" class="glass-panel">
   <button id="sidebar-toggle" title="收起/展开">«</button>

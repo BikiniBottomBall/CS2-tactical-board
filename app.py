@@ -623,9 +623,20 @@ async def export_align(request: Request):
 
 @app.websocket('/ws/{room_code}')
 async def room_websocket(ws: WebSocket, room_code: str):
-    anonymous_id = ws.headers.get('x-anonymous-id', '')
-    token = ws.headers.get('x-auth-token', '')
-    nickname = ws.headers.get('x-nickname', '游客')
+    # 浏览器 WebSocket API 不支持自定义 header，改为连接建立后读首条 _auth JSON 消息
+    await ws.accept()
+    try:
+        first = await ws.receive_json()
+    except Exception:
+        await ws.close(code=4001, reason='no auth message')
+        return
+    if first.get('_auth'):
+        anonymous_id = first['_auth'].get('anonymous_id', '')
+        token = first['_auth'].get('token', '')
+        nickname = first['_auth'].get('nickname', '游客')
+    else:
+        await ws.close(code=4001, reason='auth required')
+        return
 
     if not validate_connection(anonymous_id, token):
         await ws.close(code=4001, reason='auth failed')
@@ -637,7 +648,6 @@ async def room_websocket(ws: WebSocket, room_code: str):
         await ws.close(code=4004, reason='room not found')
         return
 
-    await ws.accept()
     await join_room(room_code, anonymous_id, ws)
 
     # 发给新用户：当前房间完整状态

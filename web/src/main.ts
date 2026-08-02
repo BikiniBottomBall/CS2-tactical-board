@@ -17,6 +17,7 @@ import { initTactic, updateTactic } from './tactic';
 import { initReplay, updateReplay } from './replay';
 import { initGrid, updateGrid } from './grid';
 import { initRefmap, updateRefmap } from './refmap';
+import { createRoom, joinRoom, leaveRoom } from './sync';
 
 /* 画质档位：流畅 dpr1 / 均衡 dpr1.5 / 画质 dpr2（高分屏帧率差异的主要来源） */
 const QUALITY_DPR = { smooth: 1, balanced: 1.5, quality: 2 };
@@ -77,6 +78,27 @@ function init() {
   initGrid();
   initRefmap();
   initTools(); // 最后：模式注册完毕后统一刷新侧边栏高亮
+
+  // ---- P9 多人协同：房间 UI ----
+  document.getElementById('btn-room-create')?.addEventListener('click', async () => {
+    try {
+      const code = await createRoom('CS2 战术板');
+      await joinRoom(code, localStorage.getItem('cs2-nickname') || undefined);
+    } catch (e) { alert('创建失败: ' + (e as Error).message); }
+  });
+  document.getElementById('btn-room-join')?.addEventListener('click', async () => {
+    const code = (document.getElementById('room-code-input') as HTMLInputElement)?.value.trim().toUpperCase();
+    if (!code) return;
+    try {
+      await joinRoom(code, localStorage.getItem('cs2-nickname') || undefined);
+    } catch (e) { alert('加入失败: ' + (e as Error).message); }
+  });
+  document.getElementById('btn-room-leave')?.addEventListener('click', () => leaveRoom());
+  document.getElementById('btn-room-copy')?.addEventListener('click', () => {
+    if (S.roomCode) navigator.clipboard.writeText(S.roomCode).then(() => alert('已复制'));
+  });
+  // 显示 room panel
+  document.getElementById('room-panel')!.style.display = 'block';
 
   // 视角按钮（侧边栏视角组；即时切换，不占工具态）
   document.getElementById('btn-view-browse').addEventListener('click', () => setMode('browse'));

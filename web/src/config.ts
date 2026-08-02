@@ -36,6 +36,7 @@ export function matchClothKeyword(name) {
 export const STORAGE_KEY_BOARD = 'cs2-board-v1';
 export const STORAGE_KEY_USER_ID = 'cs2-user-id';
 export const STORAGE_KEY_NICKNAME = 'cs2-nickname';
+export const STORAGE_KEY_ROOM = 'cs2-room';
 export const MARKER_DEFS = {
   'marker-t':  { label: 'T',  color: 0xff7a3d, css: '#ff7a3d', big: true },
   'marker-ct': { label: 'CT', color: 0x5aa9ff, css: '#5aa9ff', big: true },
