@@ -15,7 +15,9 @@ export type ClientMsg =
   | { op: 'board_clear' }
   | { op: 'lock_request'; resource: string }
   | { op: 'lock_release'; resource: string }
-  | { op: 'actor_move'; id: string; x: number; y: number; z: number };
+  | { op: 'actor_move'; id: string; x: number; y: number; z: number }
+  | { op: 'tactic_select'; tactic_id: number }
+  | { op: 'tactic_playback'; playing: boolean; step_idx: number };
 
 export type ServerMsg =
   | { op: 'room_state'; board: Record<string, unknown>; tactic_id: number | null; players: Array<{user_id: string; nickname: string}>; my_user_id: string }
@@ -32,6 +34,8 @@ export type ServerMsg =
   | { op: 'lock_acquired'; resource: string; by: string }
   | { op: 'lock_released'; resource: string }
   | { op: 'actor_moved'; id: string; x: number; y: number; z: number; by: string }
+  | { op: 'tactic_playback'; playing: boolean; step_idx: number; by: string }
+  | { op: 'tactic_changed'; tactic_id: number; by: string }
   | { op: string; [key: string]: unknown };
 
 // ---- 状态 ----

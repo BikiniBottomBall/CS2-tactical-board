@@ -69,10 +69,39 @@ actorsGroup.visible = false; // 仅战术面板打开或播放时显示
 
 let dragActorId = null;
 let playback = null;         // { stepIdx, phase, t, from, utilQueue, utilTimer }
+let _remotePlayState: {playing: boolean; stepIdx: number} | null = null;  // 远程被动跟随
+let _lastPlayBroadcast = 0;  // 播放状态广播节流
 
 /* 步骤编辑激活（board 指针交互让路判断用） */
 export function isTacticEditing() {
   return panelOpen && !playback && currentStepIdx >= 0;
+}
+
+/* ---- P9 多人协同：播放锁回调 ---- */
+export function onPlayLockAcquired(): void {
+  startPlayback();
+}
+
+/* 收到 tactic_playback 广播（远程被动跟随） */
+export function onRemotePlayback(playing: boolean, stepIdx: number): void {
+  if (playing) {
+    _remotePlayState = { playing: true, stepIdx };
+  } else {
+    _remotePlayState = null;
+    if (playback) stopPlayback();
+  }
+}
+
+/* 远程战术切换 */
+export function onRemoteTacticChanged(tacticId: number): void {
+  if (tacticId && tacticId !== currentTacticId) {
+    currentTacticId = tacticId;
+    loadCurrentSteps();
+    renderTacticSelect();
+    renderStepChips();
+    renderStepEditor();
+    syncAllActors();
+  }
 }
 
 /* ------------------------------------------------------------
@@ -291,6 +320,10 @@ function selectTactic(id) {
   loadCurrentSteps();
   renderStepChips();
   renderStepEditor();
+  // 多人模式：广播战术选择
+  if (isMultiplayer) {
+    send({ op: 'tactic_select', tactic_id: id } as any);
+  }
 }
 
 function selectStep(idx) {
@@ -349,6 +382,11 @@ function startPlayback() {
 }
 
 function stopPlayback() {
+  // 多人模式：广播停止 + 释放锁
+  if (isMultiplayer && playback) {
+    send({ op: 'tactic_playback', playing: false, step_idx: 0 } as any);
+    send({ op: 'lock_release', resource: 'tactic_playback' } as any);
+  }
   playback = null;
   dragActorId = null;
   controls.enabled = true;
@@ -375,9 +413,34 @@ function advanceStep() {
 }
 
 export function updateTactic(dt) {
+  // 远程被动跟随（不跑自己的推演逻辑）
+  if (_remotePlayState) {
+    const step = steps[_remotePlayState.stepIdx];
+    if (step && Array.isArray(step.actors)) {
+      step.actors.forEach(a => {
+        if (!ACTOR_IDS.includes(a.id)) return;
+        actorPos[a.id] = { x: a.x, y: a.y, z: a.z };
+        syncActor(a.id);
+      });
+    }
+    renderStepChips();
+    return;
+  }
+
   if (!playback) return;
   const step = steps[playback.stepIdx];
   if (!step) { stopPlayback(); return; }
+
+  // 500ms 广播播放状态
+  const now = Date.now();
+  if (isMultiplayer && now - _lastPlayBroadcast > 500) {
+    _lastPlayBroadcast = now;
+    send({
+      op: 'tactic_playback',
+      playing: true,
+      step_idx: playback.stepIdx,
+    } as any);
+  }
 
   if (playback.phase === 'move') {
     const dur = Math.max(step.duration || 2, 0.1);
@@ -564,8 +627,13 @@ export function initTactic() {
     reader.readAsText(file);
   });
   document.getElementById('tactic-play').addEventListener('click', () => {
-    if (playback) stopPlayback();
-    else startPlayback();
+    if (playback) { stopPlayback(); return; }
+    // 多人模式：先请求播放锁
+    if (isMultiplayer) {
+      send({ op: 'lock_request', resource: 'tactic_playback' } as any);
+      return; // 等待 lock_acquired 回调 → onPlayLockAcquired
+    }
+    startPlayback();
   });
   document.getElementById('step-save').addEventListener('click', saveCurrentStep);
   document.getElementById('step-note').addEventListener('keydown', e => e.stopPropagation());
