@@ -10,7 +10,9 @@ export type ClientMsg =
   | { op: 'marker_move'; id: string; x: number; y: number; z: number }
   | { op: 'marker_delete'; id: string }
   | { op: 'line_begin'; x: number; y: number; z: number; temp_id: string; points: Array<[number,number,number]> }
-  | { op: 'line_delete'; id: string };
+  | { op: 'line_delete'; id: string }
+  | { op: 'board_undo'; user_id: string; id: string }
+  | { op: 'board_clear' };
 
 export type ServerMsg =
   | { op: 'room_state'; board: Record<string, unknown>; tactic_id: number | null; players: Array<{user_id: string; nickname: string}>; my_user_id: string }
@@ -22,6 +24,8 @@ export type ServerMsg =
   | { op: 'marker_deleted'; id: string; by: string }
   | { op: 'line_updated'; id: string; points: Array<[number,number,number]>; by: string }
   | { op: 'line_deleted'; id: string; by: string }
+  | { op: 'board_undo'; id: string; by: string }
+  | { op: 'board_cleared'; by: string }
   | { op: string; [key: string]: unknown };
 
 // ---- 状态 ----

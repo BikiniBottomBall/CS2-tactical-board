@@ -6,7 +6,7 @@
  * 工具激活由 tools.ts 状态机统一调度（互斥）
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
-import { scene, camera, renderer, controls, mapGroup, isMultiplayer } from './state';
+import { scene, camera, renderer, controls, mapGroup, isMultiplayer, myUserId } from './state';
 import { send } from './network';
 import { STORAGE_KEY_BOARD, MARKER_DEFS, LINE_COLOR } from './config';
 import { registerMode, isBoardTool } from './tools';
@@ -16,7 +16,7 @@ const markersGroup = new THREE.Group();
 const linesGroup = new THREE.Group();
 const boardItems = new Map(); // id -> { type:'marker'|'line', group, kind?, points? }
 let boardSeq = 1;
-const undoStack = [];         // 添加顺序的 id 栈
+const undoStack: Array<{ id: string; userId: string }> = [];
 
 let dragMarkerId = null;
 let drawing = null;           // { id, points: Vector3[], line }
@@ -229,7 +229,7 @@ function createMarkerAt(x, y, z, kind) {
   // 单人模式：原逻辑不变
   const pos = new THREE.Vector3(x, y, z);
   const id = createMarker(kind, pos);
-  undoStack.push(id);
+  undoStack.push({ id, userId: myUserId || 'local' });
   saveBoard();
   return id;
 }
@@ -279,30 +279,55 @@ function removeBoardItem(id) {
     }
   });
   boardItems.delete(id);
-  const i = undoStack.indexOf(id);
+  const i = undoStack.findIndex(e => e.id === id);
   if (i >= 0) undoStack.splice(i, 1);
 }
 
 function undoBoard() {
-  const id = undoStack.pop();
-  if (id !== undefined) {
-    if (isMultiplayer) {
-      const item = boardItems.get(id);
-      if (item?.type === 'line') {
-        send({ op: 'line_delete', id: id } as any);
-      } else if (item?.type === 'marker') {
-        send({ op: 'marker_delete', id: id } as any);
+  if (isMultiplayer) {
+    // 找最后一个自己的操作
+    for (let i = undoStack.length - 1; i >= 0; i--) {
+      if (undoStack[i].userId === myUserId) {
+        const entry = undoStack.splice(i, 1)[0];
+        send({ op: 'board_undo', user_id: myUserId, id: entry.id } as any);
+        removeBoardItem(entry.id);
+        return;
       }
     }
-    removeBoardItem(id);
+    return; // 没有自己的操作可撤销
+  }
+  // 单人模式原逻辑
+  const entry = undoStack.pop();
+  if (entry !== undefined) {
+    removeBoardItem(entry.id);
     saveBoard();
   }
 }
 
 function clearBoard() {
+  if (isMultiplayer) {
+    if (!confirm('确定清空所有标记？这将影响房间内所有人')) return;
+    send({ op: 'board_clear' } as any);
+  }
   [...boardItems.keys()].forEach(removeBoardItem);
   undoStack.length = 0;
   saveBoard();
+}
+
+/* ---- 远程撤销/清空回调（供 sync.ts） ---- */
+
+/** 远端玩家撤销：仅删除指定项，不修改本地 undoStack */
+export function remoteUndoItem(id: string): void {
+  removeBoardItem(id);
+}
+
+/** 远端玩家清空：仅移除 marker 和 line */
+export function remoteClearAll(): void {
+  boardItems.forEach((item, id) => {
+    if (item.type === 'marker' || item.type === 'line') {
+      removeBoardItem(id);
+    }
+  });
 }
 
 /* ---- localStorage 持久化 （多人模式跳过） ---- */
@@ -329,7 +354,7 @@ export function restoreBoard() {
     (data.markers || []).forEach(m => {
       if (!MARKER_DEFS[m.kind]) return;
       const id = createMarker(m.kind, new THREE.Vector3(m.x, m.y, m.z));
-      undoStack.push(id);
+      undoStack.push({ id, userId: myUserId || 'local' });
     });
     (data.lines || []).forEach(l => {
       if (!Array.isArray(l.points) || l.points.length < 2) return;
@@ -339,7 +364,7 @@ export function restoreBoard() {
       group.userData.itemId = id;
       linesGroup.add(group);
       boardItems.set(id, { type: 'line', group, points });
-      undoStack.push(id);
+      undoStack.push({ id, userId: myUserId || 'local' });
     });
   } catch (err) {
     console.warn('[board] 恢复存档失败', err);
@@ -357,6 +382,13 @@ export function renderRemoteMarker(id, kind, x, y, z, userId) {
   group.userData.itemId = id;
   markersGroup.add(group);
   boardItems.set(id, { type: 'marker', group, kind });
+  // 自己的操作加入撤销栈
+  if (userId === myUserId) {
+    // 移除同 id 的旧 undo 条目（replace temp id if any）
+    const oldIdx = undoStack.findIndex(e => e.id === id);
+    if (oldIdx >= 0) undoStack.splice(oldIdx, 1);
+    undoStack.push({ id, userId });
+  }
 }
 
 /** 服务端推送 marker_moved 后移动远程标记 */
@@ -392,6 +424,12 @@ export function renderRemoteLine(id: string, points: number[][], _userId: string
   group.userData.itemId = id;
   linesGroup.add(group);
   boardItems.set(id, { type: 'line', group, points });
+  // 自己的操作加入撤销栈
+  if (_userId === myUserId) {
+    const oldIdx = undoStack.findIndex(e => e.id === id);
+    if (oldIdx >= 0) undoStack.splice(oldIdx, 1);
+    undoStack.push({ id, userId: _userId });
+  }
 }
 
 /** 服务端推送 line_deleted 后删除远程画笔线 */
@@ -540,7 +578,7 @@ function onBoardPointerUp() {
         linesGroup.add(group);
         boardItems.set(tempId, { type: 'line', group, points: pts });
         boardSeq++;
-        undoStack.push(tempId);
+        undoStack.push({ id: tempId, userId: myUserId || 'local' });
         saveBoard();
       } else {
         const group = createLineObject(drawing.points);
@@ -548,7 +586,7 @@ function onBoardPointerUp() {
         group.userData.itemId = id;
         linesGroup.add(group);
         boardItems.set(id, { type: 'line', group, points: drawing.points });
-        undoStack.push(id);
+        undoStack.push({ id, userId: myUserId || 'local' });
         saveBoard();
       }
     }
