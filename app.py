@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import Body, FastAPI, File, Request, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, SQLModel, select
 
@@ -371,6 +372,15 @@ def get_share(share_id: str):
         if not sl:
             return {'error': 'not found'}
         return json.loads(sl.tactic_data)
+
+
+@app.get('/view/{share_id}')
+def view_share(share_id: str):
+    """分享查看页面"""
+    share_html = os.path.join(ROOT, 'web', 'dist', 'share.html')
+    if not os.path.exists(share_html):
+        return {'error': 'share page not built, run: cd web && npm run build'}
+    return FileResponse(share_html)
 
 
 # ---- demos 回放（P7） ----
