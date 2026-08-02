@@ -6,8 +6,9 @@
  * 补间 → 道具依次投出 → 停留 → 下一步）。
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
-import { scene, renderer, controls, mapGroup } from './state';
+import { scene, renderer, controls, mapGroup, isMultiplayer } from './state';
 import { MARKER_DEFS, r1 } from './config';
+import { send } from './network';
 import { createMarkerSprite, boardRaycaster, setBoardPointer, raycastMapPoint } from './board';
 import { playUtility, getUtilityById, getUtilities } from './utility';
 import { registerMode, getMode } from './tools';
@@ -29,7 +30,38 @@ let steps = [];              // 当前战术步骤（本地编辑副本）
 let currentStepIdx = -1;
 let panelOpen = false;
 
-const actorPos = {};         // id -> {x,y,z} 当前世界位置
+/* actorPos 用 Proxy 包装：本地拖拽写入 → 100ms 节流发送 actor_move；
+ * 远程写入通过 remoteActorMove（_remoteFlag 标记）不触发 sync 回环。 */
+const _rawActorPos: Record<string, {x:number,y:number,z:number}> = {};
+const _remoteFlag = new WeakSet<object>();
+const _lastActorSync: Record<string, number> = {};
+
+ACTOR_IDS.forEach(id => { _rawActorPos[id] = defaultActorPos(id); });
+
+const actorPos = new Proxy(_rawActorPos, {
+  set(target, prop, value) {
+    if (typeof prop !== 'string' || !ACTOR_IDS.includes(prop)) {
+      target[prop as string] = value;
+      return true;
+    }
+    target[prop] = value;
+    if (isMultiplayer && !_remoteFlag.has(value)) {
+      // 本地拖拽 → 节流发送（100ms）
+      const now = Date.now();
+      if (!_lastActorSync[prop] || now - _lastActorSync[prop] > 100) {
+        _lastActorSync[prop] = now;
+        send({
+          op: 'actor_move',
+          id: prop,
+          x: r1(value.x),
+          y: r1(value.y),
+          z: r1(value.z),
+        } as any);
+      }
+    }
+    return true;
+  },
+});
 const actorObjects = new Map();
 const actorsGroup = new THREE.Group();
 actorsGroup.name = 'tactic-actors';
@@ -65,6 +97,15 @@ function groundY(x, z, fallback) {
   boardRaycaster.set(new THREE.Vector3(x, 500, z), _downDir);
   const hits = boardRaycaster.intersectObjects(mapGroup.children, false);
   return hits.length ? hits[0].point.y : fallback;
+}
+
+/* 远程演员位置同步：标记 _remoteFlag 避免 Proxy 回环，贴地 y */
+export function remoteActorMove(id: string, x: number, y: number, z: number): void {
+  const snappedY = groundY(x, z, y);
+  const pos = { x, y: snappedY, z };
+  _remoteFlag.add(pos);
+  actorPos[id] = pos;
+  syncActor(id);
 }
 
 /* 演员视觉（小圆柱底座 + 标签精灵），tactic 演员与 demo 回放共用 */

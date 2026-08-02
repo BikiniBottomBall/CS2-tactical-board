@@ -92,6 +92,21 @@ export async function joinRoom(code: string, nickname?: string): Promise<void> {
       case 'board_cleared':
         import('./board').then(m => m.remoteClearAll());
         break;
+      case 'actor_moved':
+        import('./tactic').then(m => m.remoteActorMove((msg as any).id, (msg as any).x, (msg as any).y, (msg as any).z));
+        break;
+      case 'lock_acquired':
+        import('./utility').then(m => {
+          m.updateLockUI((msg as any).by);
+          if ((msg as any).by === S.myUserId) m.onLockAcquired((msg as any).resource);
+        });
+        break;
+      case 'lock_released':
+        import('./utility').then(m => {
+          m.updateLockUI('');
+          m.onLockReleased((msg as any).resource);
+        });
+        break;
     }
   });
   
