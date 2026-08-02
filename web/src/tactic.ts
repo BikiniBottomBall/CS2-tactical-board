@@ -477,6 +477,26 @@ export function initTactic() {
   document.getElementById('tactic-import').addEventListener('click', () => {
     document.getElementById('tactic-import-file').click();
   });
+  // 分享按钮（P8）
+  document.getElementById('tactic-share').addEventListener('click', async () => {
+    const tid = currentTacticId;
+    if (!tid) return;
+    try {
+      const packRes = await fetch(`/api/tactics/${tid}/pack`);
+      const pack = await packRes.json();
+      if (pack.error) throw new Error(pack.error);
+      const shareRes = await fetch('/api/share', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pack),
+      });
+      const shareData = await shareRes.json();
+      if (shareData.error) throw new Error(shareData.error);
+      const url = `${location.origin}/view/${shareData.share_id}`;
+      showToast(url);
+    } catch (err: any) {
+      alert('分享失败：' + (err.message || err));
+    }
+  });
   document.getElementById('tactic-import-file').addEventListener('change', e => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -537,4 +557,22 @@ export function initTactic() {
   });
 
   fetchTactics();
+}
+
+let toastTimer = 0;
+function showToast(url: string) {
+  const toast = document.getElementById('toast');
+  const link = document.getElementById('toast-link');
+  const copyBtn = document.getElementById('toast-copy');
+  if (!toast || !link || !copyBtn) return;
+  link.textContent = url;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toast.classList.remove('show'), 5000);
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(url).then(() => {
+      copyBtn.textContent = '已复制 ✓';
+      setTimeout(() => { copyBtn.textContent = '复制'; }, 2000);
+    }).catch(() => { copyBtn.textContent = '失败'; });
+  };
 }
