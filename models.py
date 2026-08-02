@@ -122,3 +122,39 @@ class ShareLink(SQLModel, table=True):
     share_id: str = Field(index=True, unique=True)   # uuid4 hex[:8]，唯一
     tactic_data: Optional[str] = None                 # JSON 字符串：完整战术包
     created_at: Optional[str] = None
+
+
+class User(SQLModel, table=True):
+    """用户表（P9 多人协同 — 匿名鉴权）"""
+    __tablename__ = 'users'
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    anonymous_id: str = Field(unique=True)             # HMAC 签名 token，客户端 localStorage 生成
+    nickname: Optional[str] = None                      # 昵称，可随时改
+    created_at: Optional[str] = None
+
+
+class Room(SQLModel, table=True):
+    """房间表（P9 多人协同）"""
+    __tablename__ = 'rooms'
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(index=True, unique=True)          # 6 位房间码 A-Z0-9
+    name: Optional[str] = None
+    owner_id: Optional[int] = Field(default=None, foreign_key='users.id')
+    board_state: Optional[str] = None                   # JSON 字符串（标记/线快照）
+    tactic_id: Optional[int] = Field(default=None, foreign_key='tactics.id')
+    is_active: bool = True
+    created_at: Optional[str] = None
+    closed_at: Optional[str] = None
+
+
+class RoomMember(SQLModel, table=True):
+    """房间成员记录表（P9 多人协同）"""
+    __tablename__ = 'room_members'
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    room_id: int = Field(foreign_key='rooms.id')
+    user_id: int = Field(foreign_key='users.id')
+    joined_at: Optional[str] = None
+    left_at: Optional[str] = None
