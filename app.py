@@ -15,12 +15,15 @@ import sys
 import uuid
 from datetime import datetime
 
-from fastapi import Body, FastAPI, File, Request, UploadFile
+from fastapi import Body, FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, SQLModel, select
 
 from models import Annotation, DemoEvent, Match, ShareLink, Tactic, TacticStep, Utility, engine
+from auth import validate_connection, get_or_create_user
+from room_manager import create_room, join_room, leave_room, broadcast, get_room, room_count
+from op_handler import handle_message
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -383,6 +386,79 @@ def view_share(share_id: str):
     return FileResponse(share_html)
 
 
+# ---- 房间管理（P9） ----
+
+@app.post('/api/rooms')
+def api_create_room(data: dict = Body(...)):
+    """创建房间。需 anonymous_id + token 验证。"""
+    anonymous_id = data.get('anonymous_id', '')
+    token = data.get('token', '')
+    if not validate_connection(anonymous_id, token):
+        return {'error': 'auth failed'}
+    user = get_or_create_user(anonymous_id, data.get('nickname', ''))
+    # create_room is async, run in event loop
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        code = loop.run_until_complete(create_room(anonymous_id, data.get('name', '')))
+    finally:
+        loop.close()
+    return {'code': code}
+
+
+@app.get('/api/rooms/{code}')
+def api_get_room(code: str):
+    """查询房间信息"""
+    room = get_room(code)
+    if not room:
+        return {'error': 'not found'}
+    return {
+        'code': room.code,
+        'name': room.name,
+        'player_count': len(room.players),
+        'is_active': True,
+    }
+
+
+@app.post('/api/rooms/{code}/join')
+def api_join_room(code: str, data: dict = Body(...)):
+    """加入房间验证——仅验证 token，不建立 WebSocket。实际连接走 /ws/"""
+    anonymous_id = data.get('anonymous_id', '')
+    token = data.get('token', '')
+    if not validate_connection(anonymous_id, token):
+        return {'error': 'auth failed'}
+    room = get_room(code)
+    if not room:
+        return {'error': 'room not found'}
+    get_or_create_user(anonymous_id, data.get('nickname', ''))
+    return {'ok': True, 'code': code}
+
+
+@app.delete('/api/rooms/{code}')
+def api_close_room(code: str, data: dict = Body(...)):
+    """关闭房间（需 owner 验证）"""
+    anonymous_id = data.get('anonymous_id', '')
+    token = data.get('token', '')
+    if not validate_connection(anonymous_id, token):
+        return {'error': 'auth failed'}
+    room = get_room(code)
+    if not room:
+        return {'error': 'not found'}
+    if room.owner_id != anonymous_id:
+        return {'error': 'only room owner can close'}
+    # 踢所有人
+    import asyncio
+    async def kick_all():
+        for uid in list(room.players.keys()):
+            await leave_room(code, uid)
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(kick_all())
+    finally:
+        loop.close()
+    return {'ok': True}
+
+
 # ---- demos 回放（P7） ----
 DEMOS_RAW = os.path.join(ROOT, 'data', 'demos', 'raw')
 DEMOS_PARSED = os.path.join(ROOT, 'data', 'demos', 'parsed')
@@ -543,6 +619,56 @@ async def export_align(request: Request):
     with open(out, 'wb') as f:
         f.write(data)
     return {'ok': True, 'path': 'check_align.png', 'bytes': len(data)}
+
+
+@app.websocket('/ws/{room_code}')
+async def room_websocket(ws: WebSocket, room_code: str):
+    anonymous_id = ws.headers.get('x-anonymous-id', '')
+    token = ws.headers.get('x-auth-token', '')
+    nickname = ws.headers.get('x-nickname', '游客')
+
+    if not validate_connection(anonymous_id, token):
+        await ws.close(code=4001, reason='auth failed')
+        return
+
+    user = get_or_create_user(anonymous_id, nickname)
+    room = get_room(room_code)
+    if not room:
+        await ws.close(code=4004, reason='room not found')
+        return
+
+    await ws.accept()
+    await join_room(room_code, anonymous_id, ws)
+
+    # 发给新用户：当前房间完整状态
+    await ws.send_json({
+        'op': 'room_state',
+        'board': room.board_state,
+        'tactic_id': room.tactic_id,
+        'players': [{'user_id': uid, 'nickname': '玩家'} for uid in room.players],
+        'my_user_id': anonymous_id,
+    })
+    # 广播给其他人
+    await broadcast(room, {
+        'op': 'player_joined',
+        'user_id': anonymous_id,
+        'nickname': nickname,
+    }, exclude_user=anonymous_id)
+
+    try:
+        while True:
+            msg = await ws.receive_json()
+            await handle_message(room, anonymous_id, msg)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await leave_room(room_code, anonymous_id)
+        await broadcast(room, {
+            'op': 'player_left',
+            'user_id': anonymous_id,
+        })
 
 
 # 静态文件必须最后挂载（API 路由优先）
