@@ -6,10 +6,11 @@
  * 面板开合与互斥由 tools.ts 状态机统一调度。
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
-import { scene, renderer, mapGroup } from './state';
+import { scene, renderer, mapGroup, isMultiplayer, myUserId } from './state';
 import { MARKER_DEFS } from './config';
 import { getDotTexture, raycastMapAll } from './board';
 import { registerMode } from './tools';
+import { send } from './network';
 
 const TYPE_ORDER = ['smoke', 'flash', 'molotov'];
 const TYPE_NAMES = { smoke: '烟雾弹', flash: '闪光弹', molotov: '燃烧弹' };
@@ -23,6 +24,34 @@ let recording = null;
 let utilHits = [];         // 当前步骤点击命中层级
 let utilHitIdx = 0;
 let heightAdjust = 0;
+
+/* ---- P9 多人协同：道具录入锁 ---- */
+let currentLockHolder = '';
+export function updateLockUI(holder: string): void {
+  currentLockHolder = holder;
+  const addBtn = document.getElementById('utility-add');
+  if (addBtn) {
+    if (holder && holder !== myUserId) {
+      addBtn.disabled = true;
+      addBtn.title = '别人正在录入道具';
+    } else {
+      addBtn.disabled = false;
+      addBtn.title = '';
+    }
+  }
+}
+
+export function onLockAcquired(resource: string): void {
+  if (resource === 'utility_recording') {
+    enterRecording();
+  }
+}
+
+export function onLockReleased(resource: string): void {
+  if (resource === 'utility_recording') {
+    updateLockUI('');
+  }
+}
 
 /* 播放与效果 */
 let playing = null;        // { u, curve, ball, t }
@@ -364,6 +393,17 @@ function suggestName() {
 
 function enterRecording() {
   if (recording) return;
+  // 多人模式：请求锁，等 lock_acquired 回调再继续
+  if (isMultiplayer) {
+    send({ op: 'lock_request', resource: 'utility_recording' } as any);
+    return;
+  }
+  // 单人模式直接开始
+  startRecording();
+}
+
+function startRecording() {
+  if (recording) return;
   recording = { type: 'smoke', throwType: '站投', step: 'stand', stand: null, landing: null };
   utilHits = [];
   utilHitIdx = 0;
@@ -388,6 +428,7 @@ export function cancelUtilityRecording() {
   disposeGroup(pickPreview);
   document.getElementById('utility-entry').style.display = 'none';
   document.getElementById('utility-add').style.display = '';
+  if (isMultiplayer) send({ op: 'lock_release', resource: 'utility_recording' } as any);
 }
 
 function updateStepUI() {
