@@ -62,6 +62,22 @@ export async function joinRoom(code: string, nickname?: string): Promise<void> {
       case 'player_left':
         if (_onPlayerLeft) _onPlayerLeft(msg as any);
         break;
+      case 'marker_placed':
+        import('./board').then(m => m.renderRemoteMarker(
+          (msg as any).id, (msg as any).kind,
+          (msg as any).x, (msg as any).y, (msg as any).z,
+          (msg as any).by
+        ));
+        break;
+      case 'marker_moved':
+        import('./board').then(m => m.moveRemoteMarker(
+          (msg as any).id,
+          (msg as any).x, (msg as any).y, (msg as any).z
+        ));
+        break;
+      case 'marker_deleted':
+        import('./board').then(m => m.removeRemoteMarker((msg as any).id));
+        break;
     }
   });
   

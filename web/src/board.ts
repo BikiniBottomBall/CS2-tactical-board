@@ -6,7 +6,8 @@
  * 工具激活由 tools.ts 状态机统一调度（互斥）
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
-import { scene, camera, renderer, controls, mapGroup } from './state';
+import { scene, camera, renderer, controls, mapGroup, isMultiplayer } from './state';
+import { send } from './network';
 import { STORAGE_KEY_BOARD, MARKER_DEFS, LINE_COLOR } from './config';
 import { registerMode, isBoardTool } from './tools';
 
@@ -177,8 +178,9 @@ function setMarkerScale(v) {
   });
 }
 
-function createMarker(toolKey, pos) {
-  const def = MARKER_DEFS[toolKey];
+/* 创建标记的 3D 网格（不分配 id、不加入 boardItems），供本地和远程复用 */
+function createMarkerMesh(kind, pos) {
+  const def = MARKER_DEFS[kind];
   const group = new THREE.Group();
 
   const r = def.big ? 2.4 : 1.7;
@@ -198,10 +200,37 @@ function createMarker(toolKey, pos) {
   group.userData.spriteBase = sbase;
 
   group.position.copy(pos);
+  return group;
+}
+
+function createMarker(toolKey, pos) {
+  const group = createMarkerMesh(toolKey, pos);
   const id = boardSeq++;
   group.userData.itemId = id;
   markersGroup.add(group);
   boardItems.set(id, { type: 'marker', group, kind: toolKey });
+  return id;
+}
+
+/* 标记放置入口：多人模式走 sync，单人模式走本地创建 + localStorage */
+function createMarkerAt(x, y, z, kind) {
+  if (isMultiplayer) {
+    const tempId = 'tmp-' + crypto.randomUUID().slice(0, 8);
+    send({
+      op: 'marker_place',
+      kind: kind,
+      x: Math.round(x * 10) / 10,
+      y: Math.round(y * 10) / 10,
+      z: Math.round(z * 10) / 10,
+      temp_id: tempId,
+    } as any);
+    return; // 不直接渲染，等服务端 echo
+  }
+  // 单人模式：原逻辑不变
+  const pos = new THREE.Vector3(x, y, z);
+  const id = createMarker(kind, pos);
+  undoStack.push(id);
+  saveBoard();
   return id;
 }
 
@@ -268,8 +297,9 @@ function clearBoard() {
   saveBoard();
 }
 
-/* ---- localStorage 持久化 ---- */
+/* ---- localStorage 持久化 （多人模式跳过） ---- */
 function saveBoard() {
+  if (isMultiplayer) return;
   const markers = [], lines = [];
   boardItems.forEach(item => {
     if (item.type === 'marker') {
@@ -283,6 +313,7 @@ function saveBoard() {
 }
 
 export function restoreBoard() {
+  if (isMultiplayer) return;
   try {
     const raw = localStorage.getItem(STORAGE_KEY_BOARD);
     if (!raw) return;
@@ -307,6 +338,44 @@ export function restoreBoard() {
   }
 }
 
+/* ---- 远程标记渲染（供 sync.ts 回调） ---- */
+
+/** 服务端 echo marker_placed 后渲染远程标记 */
+export function renderRemoteMarker(id, kind, x, y, z, userId) {
+  // 如果本地已有同 id 的标记（乐观更新或其他玩家已渲染），跳过
+  if (boardItems.has(id)) return;
+  const pos = new THREE.Vector3(x, y, z);
+  const group = createMarkerMesh(kind, pos);
+  group.userData.itemId = id;
+  markersGroup.add(group);
+  boardItems.set(id, { type: 'marker', group, kind });
+}
+
+/** 服务端推送 marker_moved 后移动远程标记 */
+export function moveRemoteMarker(id, x, y, z) {
+  const item = boardItems.get(id);
+  if (item && item.group) {
+    item.group.position.set(x, y, z);
+  }
+}
+
+/** 服务端推送 marker_deleted 后删除远程标记 */
+export function removeRemoteMarker(id) {
+  const item = boardItems.get(id);
+  if (!item) return;
+  if (item.group) {
+    item.group.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+      }
+    });
+    markersGroup.remove(item.group);
+  }
+  boardItems.delete(id);
+}
+
 /* ---- 指针交互（仅在本模块工具激活时响应，互斥由状态机保证） ---- */
 function onBoardPointerDown(e) {
   if (e.button !== 0 || !mapGroup || !currentTool) return;
@@ -327,15 +396,18 @@ function onBoardPointerDown(e) {
   } else if (MARKER_DEFS[currentTool]) {
     const pt = raycastMapPoint(e);
     if (pt) {
-      const id = createMarker(currentTool, pt);
-      undoStack.push(id);
-      saveBoard();
-      dragMarkerId = id; // 放置后可不松手直接拖
-      controls.enabled = false;
+      const id = createMarkerAt(pt.x, pt.y, pt.z, currentTool);
+      if (id !== undefined) {
+        dragMarkerId = id; // 单人模式：放置后可不松手直接拖
+        controls.enabled = false;
+      }
     }
   } else if (currentTool === 'eraser') {
     const id = pickBoardItem(e);
     if (id !== null) {
+      if (isMultiplayer) {
+        send({ op: 'marker_delete', id: id } as any);
+      }
       removeBoardItem(id);
       saveBoard();
     }
@@ -350,7 +422,23 @@ function onBoardPointerMove(e) {
 
   if (dragMarkerId !== null) {
     const item = boardItems.get(dragMarkerId);
-    if (item) item.group.position.copy(pt);
+    if (item) {
+      item.group.position.copy(pt);
+      // 多人模式：100ms 节流同步拖拽位置
+      if (isMultiplayer) {
+        const now = Date.now();
+        if (!item.group.userData._lastSync || now - item.group.userData._lastSync > 100) {
+          item.group.userData._lastSync = now;
+          send({
+            op: 'marker_move',
+            id: dragMarkerId,
+            x: Math.round(pt.x * 10) / 10,
+            y: Math.round(pt.y * 10) / 10,
+            z: Math.round(pt.z * 10) / 10,
+          } as any);
+        }
+      }
+    }
   } else if (drawing) {
     const last = drawing.points[drawing.points.length - 1];
     if (last.distanceTo(pt) > 1.2) {
@@ -373,6 +461,20 @@ function onBoardPointerMove(e) {
 
 function onBoardPointerUp() {
   if (dragMarkerId !== null) {
+    // 多人模式：松手时发送最终位置
+    if (isMultiplayer) {
+      const item = boardItems.get(dragMarkerId);
+      if (item) {
+        const p = item.group.position;
+        send({
+          op: 'marker_move',
+          id: dragMarkerId,
+          x: Math.round(p.x * 10) / 10,
+          y: Math.round(p.y * 10) / 10,
+          z: Math.round(p.z * 10) / 10,
+        } as any);
+      }
+    }
     dragMarkerId = null;
     controls.enabled = true;
     saveBoard();
@@ -403,6 +505,9 @@ function onBoardRightClick(e) {
   if (!mapGroup || !isBoardTool()) return;
   const id = pickBoardItem(e);
   if (id !== null) {
+    if (isMultiplayer) {
+      send({ op: 'marker_delete', id: id } as any);
+    }
     removeBoardItem(id);
     saveBoard();
   }
