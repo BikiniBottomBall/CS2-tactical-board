@@ -286,6 +286,14 @@ function removeBoardItem(id) {
 function undoBoard() {
   const id = undoStack.pop();
   if (id !== undefined) {
+    if (isMultiplayer) {
+      const item = boardItems.get(id);
+      if (item?.type === 'line') {
+        send({ op: 'line_delete', id: id } as any);
+      } else if (item?.type === 'marker') {
+        send({ op: 'marker_delete', id: id } as any);
+      }
+    }
     removeBoardItem(id);
     saveBoard();
   }
@@ -376,6 +384,33 @@ export function removeRemoteMarker(id) {
   boardItems.delete(id);
 }
 
+/** 服务端推送 line_updated 后渲染远程画笔线 */
+export function renderRemoteLine(id: string, points: number[][], _userId: string): void {
+  if (boardItems.has(id)) return; // 乐观更新已创建
+  const pts = points.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+  const group = createLineObject(pts);
+  group.userData.itemId = id;
+  linesGroup.add(group);
+  boardItems.set(id, { type: 'line', group, points });
+}
+
+/** 服务端推送 line_deleted 后删除远程画笔线 */
+export function removeRemoteLine(id: string): void {
+  const item = boardItems.get(id);
+  if (!item) return;
+  if (item.group) {
+    item.group.traverse((o: any) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach((m: any) => { if (m.map) m.map.dispose(); m.dispose(); });
+      }
+    });
+    linesGroup.remove(item.group);
+  }
+  boardItems.delete(id);
+}
+
 /* ---- 指针交互（仅在本模块工具激活时响应，互斥由状态机保证） ---- */
 function onBoardPointerDown(e) {
   if (e.button !== 0 || !mapGroup || !currentTool) return;
@@ -406,7 +441,12 @@ function onBoardPointerDown(e) {
     const id = pickBoardItem(e);
     if (id !== null) {
       if (isMultiplayer) {
-        send({ op: 'marker_delete', id: id } as any);
+        const item = boardItems.get(id);
+        if (item?.type === 'line') {
+          send({ op: 'line_delete', id: id } as any);
+        } else {
+          send({ op: 'marker_delete', id: id } as any);
+        }
       }
       removeBoardItem(id);
       saveBoard();
@@ -487,13 +527,30 @@ function onBoardPointerUp() {
       drawing.line.material.dispose();
     }
     if (drawing.points.length >= 2) {
-      const group = createLineObject(drawing.points);
-      const id = boardSeq++;
-      group.userData.itemId = id;
-      linesGroup.add(group);
-      boardItems.set(id, { type: 'line', group, points: drawing.points });
-      undoStack.push(id);
-      saveBoard();
+      if (isMultiplayer) {
+        // 提取 points 为简单坐标数组，发送整条线（预览帧不同步）
+        const pts: Array<[number,number,number]> = drawing.points.map((v: THREE.Vector3) =>
+          [Math.round(v.x * 10) / 10, Math.round(v.y * 10) / 10, Math.round(v.z * 10) / 10] as [number,number,number]
+        );
+        const tempId = 'L' + boardSeq;
+        send({ op: 'line_begin', x: pts[0][0], y: pts[0][1], z: pts[0][2], temp_id: tempId, points: pts } as any);
+        // 本地乐观渲染
+        const group = createLineObject(drawing.points);
+        group.userData.itemId = tempId;
+        linesGroup.add(group);
+        boardItems.set(tempId, { type: 'line', group, points: pts });
+        boardSeq++;
+        undoStack.push(tempId);
+        saveBoard();
+      } else {
+        const group = createLineObject(drawing.points);
+        const id = boardSeq++;
+        group.userData.itemId = id;
+        linesGroup.add(group);
+        boardItems.set(id, { type: 'line', group, points: drawing.points });
+        undoStack.push(id);
+        saveBoard();
+      }
     }
     drawing = null;
   }
@@ -506,7 +563,12 @@ function onBoardRightClick(e) {
   const id = pickBoardItem(e);
   if (id !== null) {
     if (isMultiplayer) {
-      send({ op: 'marker_delete', id: id } as any);
+      const item = boardItems.get(id);
+      if (item?.type === 'line') {
+        send({ op: 'line_delete', id: id } as any);
+      } else {
+        send({ op: 'marker_delete', id: id } as any);
+      }
     }
     removeBoardItem(id);
     saveBoard();

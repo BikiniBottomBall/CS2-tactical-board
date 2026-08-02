@@ -78,6 +78,14 @@ export async function joinRoom(code: string, nickname?: string): Promise<void> {
       case 'marker_deleted':
         import('./board').then(m => m.removeRemoteMarker((msg as any).id));
         break;
+      case 'line_updated':
+        import('./board').then(m => m.renderRemoteLine(
+          (msg as any).id, (msg as any).points, (msg as any).by
+        ));
+        break;
+      case 'line_deleted':
+        import('./board').then(m => m.removeRemoteLine((msg as any).id));
+        break;
     }
   });
   
