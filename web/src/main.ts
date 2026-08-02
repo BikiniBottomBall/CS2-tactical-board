@@ -17,7 +17,8 @@ import { initTactic, updateTactic } from './tactic';
 import { initReplay, updateReplay } from './replay';
 import { initGrid, updateGrid } from './grid';
 import { initRefmap, updateRefmap } from './refmap';
-import { createRoom, joinRoom, leaveRoom } from './sync';
+import { createRoom, joinRoom, leaveRoom, cleanupStaleCursors } from './sync';
+import { send } from './network';
 
 /* 画质档位：流畅 dpr1 / 均衡 dpr1.5 / 画质 dpr2（高分屏帧率差异的主要来源） */
 const QUALITY_DPR = { smooth: 1, balanced: 1.5, quality: 2 };
@@ -115,6 +116,18 @@ function init() {
   window.addEventListener('resize', handleResize);
 
   loadMap();
+
+  // P9-15: 本地光标位置上报（50ms 节流）
+  let lastCursorSync = 0;
+  renderer.domElement.addEventListener('pointermove', () => {
+    if (!S.isMultiplayer) return;
+    const now = Date.now();
+    if (now - lastCursorSync < 50) return;
+    lastCursorSync = now;
+    // 用 OrbitControls target 近似光标在地图上的关注点
+    send({ op: 'cursor_move', x: S.controls.target.x, z: S.controls.target.z });
+  });
+
   animate();
 }
 
@@ -135,6 +148,7 @@ function animate() {
   updateReplay(dt);  // demo 回放
   updateGrid();      // 网格显隐（跟随正俯视）
   updateRefmap(dt);  // 参考图显隐
+  cleanupStaleCursors();  // P9-15: 清理超时远程光标
   S.controls.update();
   S.renderer.render(S.scene, S.camera);
 }

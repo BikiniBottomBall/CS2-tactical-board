@@ -89,10 +89,14 @@ function doConnect(): void {
 
   ws.onopen = () => {
     setState('connected');
+    // 如果是重连（非首次），清空缓冲区，丢弃过期操作，等 room_state 恢复
+    if (reconnectAttempts > 0) {
+      msgBuffer = [];
+    }
     reconnectAttempts = 0;
     // 发送认证 header（通过首条消息）
     sendRaw({ _auth: { anonymous_id: currentAnonymousId, token: currentToken, nickname: currentNickname } });
-    // 重放缓冲消息
+    // 重放缓冲消息（重连时已清空）
     for (const msg of msgBuffer) sendRaw(msg);
     msgBuffer = [];
   };

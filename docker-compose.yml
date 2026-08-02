@@ -11,6 +11,23 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'cs2user']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    container_name: cs2-app
+    ports:
+      - '8000:8000'
+    environment:
+      BOARD_DB_URL: postgresql://cs2user:cs2pass@postgres:5432/cs2tactical
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

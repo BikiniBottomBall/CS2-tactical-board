@@ -1,0 +1,83 @@
+{
+  "schema_version": 2,
+  "active_work_id": "p8-p9-480ce5f1",
+  "works": {
+    "p8-p9-480ce5f1": {
+      "work_id": "p8-p9-480ce5f1",
+      "active_plan": "D:\\KimiCode\\cs2-tactical-board\\.sisyphus\\plans\\p8-p9.md",
+      "plan_name": "p8-p9",
+      "status": "completed",
+      "started_at": "2026-07-31T09:17:20.414Z",
+      "updated_at": "2026-08-02T08:18:25.246Z",
+      "session_ids": [
+        "ses_048fd2037ffeFIwZ7wpfAj5orK",
+        "ses_03e778adaffecO4k2hAXFqkmcB",
+        "ses_03e777dbcffe7sutLt6CHZIrWd",
+        "ses_03e777113fferr7l88cM1MhoCM",
+        "ses_03e775e4fffegoX1z8DRg0n4f7"
+      ],
+      "session_origins": {
+        "ses_048fd2037ffeFIwZ7wpfAj5orK": "direct",
+        "ses_03e778adaffecO4k2hAXFqkmcB": "appended",
+        "ses_03e777dbcffe7sutLt6CHZIrWd": "appended",
+        "ses_03e777113fferr7l88cM1MhoCM": "appended",
+        "ses_03e775e4fffegoX1z8DRg0n4f7": "appended"
+      },
+      "agent": "atlas",
+      "task_sessions": {
+        "final-wave:f1": {
+          "task_key": "final-wave:f1",
+          "task_label": "F1",
+          "task_title": "Plan Compliance Audit — `oracle`",
+          "session_id": "ses_03e775e4fffegoX1z8DRg0n4f7",
+          "agent": "Sisyphus-Junior",
+          "category": "deep",
+          "started_at": "2026-07-31T09:20:13.872Z",
+          "status": "completed",
+          "updated_at": "2026-08-02T08:18:13.424Z",
+          "ended_at": "2026-08-02T08:18:13.424Z",
+          "elapsed_ms": 169079552
+        }
+      },
+      "ended_at": "2026-08-02T08:18:25.246Z",
+      "elapsed_ms": 169264832
+    }
+  },
+  "active_plan": "D:\\KimiCode\\cs2-tactical-board\\.sisyphus\\plans\\p8-p9.md",
+  "started_at": "2026-07-31T09:17:20.414Z",
+  "status": "completed",
+  "updated_at": "2026-08-02T08:18:25.246Z",
+  "session_ids": [
+    "ses_048fd2037ffeFIwZ7wpfAj5orK",
+    "ses_03e778adaffecO4k2hAXFqkmcB",
+    "ses_03e777dbcffe7sutLt6CHZIrWd",
+    "ses_03e777113fferr7l88cM1MhoCM",
+    "ses_03e775e4fffegoX1z8DRg0n4f7"
+  ],
+  "session_origins": {
+    "ses_048fd2037ffeFIwZ7wpfAj5orK": "direct",
+    "ses_03e778adaffecO4k2hAXFqkmcB": "appended",
+    "ses_03e777dbcffe7sutLt6CHZIrWd": "appended",
+    "ses_03e777113fferr7l88cM1MhoCM": "appended",
+    "ses_03e775e4fffegoX1z8DRg0n4f7": "appended"
+  },
+  "plan_name": "p8-p9",
+  "task_sessions": {
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "Plan Compliance Audit — `oracle`",
+      "session_id": "ses_03e775e4fffegoX1z8DRg0n4f7",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "started_at": "2026-07-31T09:20:13.872Z",
+      "status": "completed",
+      "updated_at": "2026-08-02T08:18:13.424Z",
+      "ended_at": "2026-08-02T08:18:13.424Z",
+      "elapsed_ms": 169079552
+    }
+  },
+  "agent": "atlas",
+  "ended_at": "2026-08-02T08:18:25.246Z",
+  "elapsed_ms": 169264832
+}
