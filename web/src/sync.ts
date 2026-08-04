@@ -26,6 +26,17 @@ export function onPlayerLeft(fn: (data: any) => void): void { _onPlayerLeft = fn
 let _players: Array<{user_id: string; nickname: string}> = [];
 export function getPlayers() { return _players; }
 
+/* room_state.board 里的单个画板项（服务端 JSON 反序列化后的形状） */
+interface RemoteBoardItem {
+  type?: string;
+  kind?: string;
+  points?: Array<[number, number, number]>;
+  x?: number;
+  y?: number;
+  z?: number;
+  by?: string;
+}
+
 function cssHashColor(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = ((hash << 5) - hash) + str.charCodeAt(i);
@@ -47,15 +58,22 @@ function getOrCreateId(): string {
   return id;
 }
 
+async function fetchToken(uid: string): Promise<string> {
+  const res = await fetch(`/api/auth/token?anonymous_id=${encodeURIComponent(uid)}`);
+  if (!res.ok) throw new Error(`token 签发失败 HTTP ${res.status}`);
+  return (await res.json()).token;
+}
+
 export async function createRoom(name?: string): Promise<string> {
   const uid = getOrCreateId();
+  const token = await fetchToken(uid);
   const res = await fetch('/api/rooms', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ anonymous_id: uid, name: name || '' }),
+    body: JSON.stringify({ anonymous_id: uid, token, name: name || '' }),
   });
+  if (!res.ok) throw new Error(`创建房间失败 HTTP ${res.status}`);
   const data = await res.json();
-  if (data.error) throw new Error(data.error);
   return data.code;
 }
 
@@ -63,11 +81,12 @@ export async function joinRoom(code: string, nickname?: string): Promise<void> {
   const uid = getOrCreateId();
   const nick = nickname || localStorage.getItem(STORAGE_KEY_NICKNAME) || '游客';
   localStorage.setItem(STORAGE_KEY_NICKNAME, nick);
-  
+
   // 连接 WebSocket（auth 通过首条 _auth 消息）
-  net.connect(code, uid, '', nick);
+  const token = await fetchToken(uid);
+  net.connect(code, uid, token, nick);
   
-  // 注册消息处理器
+  // 注册消息处理器（ServerMsg 判别联合，switch 内自动收窄）
   net.onMessage((msg: ServerMsg) => {
     switch (msg.op) {
       case 'room_state':
@@ -75,13 +94,12 @@ export async function joinRoom(code: string, nickname?: string): Promise<void> {
         S.setMyUserId(msg.my_user_id);
         S.setRoomCode(code);
         localStorage.setItem(STORAGE_KEY_ROOM, code);
-        _players = (msg as any).players || [];
+        _players = msg.players || [];
         updateRoomUI();
         // Diff merge board items（重连时服务端发完整 room_state，只添加本地没有的）
         import('./board').then(m => {
-          const remoteBoard = (msg as any).board || {};
-          for (const [id, item] of Object.entries(remoteBoard)) {
-            const bItem = item as any;
+          const remoteBoard = msg.board as Record<string, RemoteBoardItem>;
+          for (const [id, bItem] of Object.entries(remoteBoard)) {
             if (bItem.type === 'line') {
               m.renderRemoteLine(id, bItem.points, bItem.by);
             } else {
@@ -92,88 +110,80 @@ export async function joinRoom(code: string, nickname?: string): Promise<void> {
         if (_onRoomState) _onRoomState(msg);
         break;
       case 'player_joined':
-        _players.push({ user_id: (msg as any).user_id, nickname: (msg as any).nickname || '玩家' });
+        _players.push({ user_id: msg.user_id, nickname: msg.nickname || '玩家' });
         updateRoomUI();
-        if (_onPlayerJoined) _onPlayerJoined(msg as any);
+        if (_onPlayerJoined) _onPlayerJoined(msg);
         break;
       case 'player_left':
-        _players = _players.filter(p => p.user_id !== (msg as any).user_id);
+        _players = _players.filter(p => p.user_id !== msg.user_id);
         updateRoomUI();
-        if (_onPlayerLeft) _onPlayerLeft(msg as any);
+        if (_onPlayerLeft) _onPlayerLeft(msg);
         break;
       case 'cursor_move':
-        updateRemoteCursor((msg as any).user_id, (msg as any).x, (msg as any).z);
+        updateRemoteCursor(msg.user_id, msg.x, msg.z);
         break;
       case 'marker_placed':
         import('./board').then(m => m.renderRemoteMarker(
-          (msg as any).id, (msg as any).kind,
-          (msg as any).x, (msg as any).y, (msg as any).z,
-          (msg as any).by
+          msg.id, msg.kind, msg.x, msg.y, msg.z, msg.by
         ));
         break;
       case 'marker_moved':
-        import('./board').then(m => m.moveRemoteMarker(
-          (msg as any).id,
-          (msg as any).x, (msg as any).y, (msg as any).z
-        ));
+        import('./board').then(m => m.moveRemoteMarker(msg.id, msg.x, msg.y, msg.z));
         break;
       case 'marker_deleted':
-        import('./board').then(m => m.removeRemoteMarker((msg as any).id));
+        import('./board').then(m => m.removeRemoteMarker(msg.id));
         break;
       case 'line_updated':
-        import('./board').then(m => m.renderRemoteLine(
-          (msg as any).id, (msg as any).points, (msg as any).by
-        ));
+        import('./board').then(m => m.renderRemoteLine(msg.id, msg.points, msg.by));
         break;
       case 'line_deleted':
-        import('./board').then(m => m.removeRemoteLine((msg as any).id));
+        import('./board').then(m => m.removeRemoteLine(msg.id));
         break;
       case 'board_undo':
-        import('./board').then(m => m.remoteUndoItem((msg as any).id));
+        import('./board').then(m => m.remoteUndoItem(msg.id));
         break;
       case 'board_cleared':
         import('./board').then(m => m.remoteClearAll());
         break;
       case 'actor_moved':
-        import('./tactic').then(m => m.remoteActorMove((msg as any).id, (msg as any).x, (msg as any).y, (msg as any).z));
+        import('./tactic').then(m => m.remoteActorMove(msg.id, msg.x, msg.y, msg.z));
         break;
       case 'tactic_playback':
-        import('./tactic').then(m => m.onRemotePlayback((msg as any).playing, (msg as any).step_idx));
+        import('./tactic').then(m => m.onRemotePlayback(msg.playing, msg.step_idx));
         break;
       case 'tactic_changed':
-        import('./tactic').then(m => m.onRemoteTacticChanged((msg as any).tactic_id));
+        import('./tactic').then(m => m.onRemoteTacticChanged(msg.tactic_id));
         break;
       case 'lock_acquired':
         import('./utility').then(m => {
-          m.updateLockUI((msg as any).by);
-          if ((msg as any).by === S.myUserId) m.onLockAcquired((msg as any).resource);
+          m.updateLockUI(msg.by);
+          if (msg.by === S.myUserId) m.onLockAcquired(msg.resource);
         });
         // 锁状态提示
         {
-          const holder = (msg as any).by;
-          const holderName = holder === S.myUserId ? '你' : playerDisplayName(holder);
+          const holderName = msg.by === S.myUserId ? '你' : playerDisplayName(msg.by);
           // 道具面板锁提示
           const ulh = document.getElementById('utility-lock-hint');
-          if (ulh && (msg as any).resource === 'utility_recording') {
+          if (ulh && msg.resource === 'utility_recording') {
             ulh.textContent = `🔒 ${holderName} 正在录入道具`;
             ulh.style.display = 'block';
           }
           // 战术面板锁提示
           const tlh = document.getElementById('tactic-lock-hint');
-          if (tlh && (msg as any).resource === 'tactic_playback') {
+          if (tlh && msg.resource === 'tactic_playback') {
             tlh.textContent = `🔒 ${holderName} 正在播放`;
             tlh.style.display = 'block';
           }
         }
         // tactic_playback 锁回调
-        if ((msg as any).resource === 'tactic_playback' && (msg as any).by === S.myUserId) {
+        if (msg.resource === 'tactic_playback' && msg.by === S.myUserId) {
           import('./tactic').then(m => m.onPlayLockAcquired());
         }
         break;
       case 'lock_released':
         import('./utility').then(m => {
           m.updateLockUI('');
-          m.onLockReleased((msg as any).resource);
+          m.onLockReleased(msg.resource);
         });
         // 清除锁状态提示
         {
@@ -182,6 +192,9 @@ export async function joinRoom(code: string, nickname?: string): Promise<void> {
           const tlh = document.getElementById('tactic-lock-hint');
           if (tlh) { tlh.textContent = ''; tlh.style.display = 'none'; }
         }
+        break;
+      case 'error':
+        console.warn('[sync] 服务端错误消息:', msg.message);
         break;
     }
   });
@@ -292,9 +305,12 @@ export function cleanupStaleCursors(): void {
   const now = Date.now();
   remoteCursors.forEach((entry, id) => {
     if (now - entry.lastSeen > CURSOR_TIMEOUT) {
-      entry.mesh.traverse((o: any) => {
-        if (o.geometry) o.geometry.dispose();
-        if (o.material) o.material.dispose();
+      entry.mesh.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+        const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(mat)) mat.forEach(x => x.dispose());
+        else if (mat) mat.dispose();
       });
       S.scene.remove(entry.mesh);
       remoteCursors.delete(id);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /* ------------------------------------------------------------
  * 入口：装配 scene/camera/renderer/controls 注入 state，
  * 初始化各子系统，启动渲染循环。
@@ -20,6 +19,16 @@ import { initRefmap, updateRefmap } from './refmap';
 import { createRoom, joinRoom, leaveRoom, cleanupStaleCursors } from './sync';
 import { send } from './network';
 
+/* e2e/调试探针（window 挂载点） */
+declare global {
+  interface Window {
+    __scene: any;
+    __camera: any;
+    __controls: any;
+    __mapReady: boolean;
+  }
+}
+
 /* 画质档位：流畅 dpr1 / 均衡 dpr1.5 / 画质 dpr2（高分屏帧率差异的主要来源） */
 const QUALITY_DPR = { smooth: 1, balanced: 1.5, quality: 2 };
 let currentQuality = localStorage.getItem('cs2-quality') || 'balanced';
@@ -38,7 +47,7 @@ function init() {
   document.getElementById('app').appendChild(renderer.domElement);
 
   // 画质选择器（左上角面板）
-  const sel = document.getElementById('sel-quality');
+  const sel = document.getElementById('sel-quality') as HTMLSelectElement | null;
   if (sel) {
     sel.value = currentQuality;
     sel.addEventListener('change', () => {
@@ -147,7 +156,7 @@ function animate() {
   updateTactic(dt);  // 战术推演
   updateReplay(dt);  // demo 回放
   updateGrid();      // 网格显隐（跟随正俯视）
-  updateRefmap(dt);  // 参考图显隐
+  updateRefmap();   // 参考图显隐
   cleanupStaleCursors();  // P9-15: 清理超时远程光标
   S.controls.update();
   S.renderer.render(S.scene, S.camera);

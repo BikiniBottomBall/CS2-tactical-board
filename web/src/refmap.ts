@@ -109,8 +109,8 @@ async function exportAlignImage() {
       if (!blob) return;
       try {
         const r = await fetch('/api/export-align', { method: 'POST', body: blob });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
-        if (data.error) throw new Error(data.error);
         flashBadge(`📷 已导出 ${data.path}（${Math.round(data.bytes / 1024)} KB）`);
       } catch (e) {
         flashBadge('导出失败：' + e.message);

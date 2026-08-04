@@ -36,7 +36,7 @@ export type ServerMsg =
   | { op: 'actor_moved'; id: string; x: number; y: number; z: number; by: string }
   | { op: 'tactic_playback'; playing: boolean; step_idx: number; by: string }
   | { op: 'tactic_changed'; tactic_id: number; by: string }
-  | { op: string; [key: string]: unknown };
+  | { op: 'error'; message: string };
 
 // ---- 状态 ----
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';

@@ -134,7 +134,6 @@ if (shareId) {
       const res = await fetch(`/api/share/${shareId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ShareData = await res.json();
-      if ((data as any).error) throw new Error((data as any).error);
 
       const name = getTacticName(data);
       if (name) {

@@ -116,7 +116,7 @@ async function uploadDemo(file) {
     fd.append('file', file);
     const r = await fetch('/api/demos/upload', { method: 'POST', body: fd });
     const data = await r.json();
-    if (data.error) throw new Error(data.error);
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
     status.textContent = `解析完成：${data.name}（${fmtTime(data.duration_s || 0)}）`;
     await fetchDemos();
     selectDemo(data.id);
@@ -138,8 +138,8 @@ async function selectDemo(id) {
   status.textContent = '加载解析包…';
   try {
     const r = await fetch(`/api/demos/${id}/pack`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
-    if (data.error) throw new Error(data.error);
     pack = data;
     pack.utility_events.sort((a, b) => a.tick - b.tick);
     duration = pack.meta.duration_s || (pack.meta.max_tick / pack.meta.tick_rate);

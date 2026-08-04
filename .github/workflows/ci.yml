@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pip install pytest pytest-asyncio httpx pytest-cov ruff black
+      - run: ruff check app.py models.py auth.py room_manager.py op_handler.py schemas.py tests/
+      - run: black --check app.py models.py auth.py room_manager.py op_handler.py schemas.py tests/
+      - run: pytest tests/ -v --cov=app --cov=op_handler --cov=auth --cov=room_manager
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd web && npm ci
+      - run: cd web && npx tsc --noEmit
+      - run: cd web && npm run build

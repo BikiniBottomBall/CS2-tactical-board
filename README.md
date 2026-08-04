@@ -39,20 +39,59 @@ cd web && npm i && npm run build && cd ..
 
 打开 http://localhost:8000 即可。Draco 解码器在 `libs/draco/`（已入库，无需额外处理）。
 
+## 测试与代码检查
+
+```bash
+# 运行测试（42 例，内存 SQLite 隔离）
+.venv/Scripts/pytest tests/ -v
+
+# 覆盖率（目标 ≥60%）
+.venv/Scripts/pytest tests/ --cov=app --cov=op_handler --cov=auth --cov=room_manager
+
+# 代码检查
+.venv/Scripts/ruff check .
+.venv/Scripts/black --check .
+
+# 前端类型检查
+cd web && npx tsc --noEmit
+```
+
+## Docker 运行
+
+```bash
+docker compose up -d --build   # app（:8000）+ PostgreSQL（:5432，pgdata 卷）
+```
+
+环境变量集中走 `config.py`（Pydantic Settings），可配项见 `.env.example`。
+
 ## 目录说明
 
 ```
-app.py            FastAPI 后端（静态服务 + REST API）
-models.py         SQLModel 表结构（道具/战术/demo 对局/模型登记；annotations 表已废弃）
-alembic/          数据库迁移（0001~0005）
+app.py            FastAPI 后端（静态服务 + REST API + WebSocket 房间）
+schemas.py        API 契约（Pydantic Request/Response 模型）
+config.py         配置管理（环境变量集中读取）
+models.py         SQLModel 表结构（道具/战术/demo 对局/房间/用户；annotations 表已废弃）
+auth.py           匿名鉴权（HMAC token）
+room_manager.py   房间内存管理器
+op_handler.py     房间消息分发（锁 per-room 隔离）
+alembic/          数据库迁移（0001~0008）
+tests/            pytest 测试（CRUD + 鉴权 + 房间 + 锁）
 web/              前端源码（Vite + TS，build 到 web/dist 由后端服务）
 tools/            demo 解析管线（parse_demo.py / verify_demo.py）
 data/             模型与 demo 数据（glb/raw/parsed 均不入库，见 .gitignore）
 libs/draco/       Draco 解码器
-ROADMAP.md        技术栈定稿与阶段路线图（P0~P9）
+ROADMAP.md        技术栈定稿与阶段路线图（P0~P10）
 ```
 
 ## 路线图状态
 
-已完成：真实模型加载与纯色材质、道具库、战术编排、战术包分享、demo 回放与解析管线、性能优化（P0~P7）；坐标系统一（worldToScene）、侧边栏工具状态机、坐标网格/参考图对齐。标点校准与点位/区域标注已于 2026-07-30 移除（数据清空）。
-待做：P8 链接分享、P9 多人协同。详见 `ROADMAP.md`。
+已完成：真实模型加载与纯色材质、道具库、战术编排、战术包分享、demo 回放与解析管线、链接分享、多人协同（P0~P9）；坐标系统一（worldToScene）、侧边栏工具状态机、坐标网格/参考图对齐。标点校准与点位/区域标注已于 2026-07-30 移除（数据清空）。
+
+## P10 工程化（已完成）
+
+- 全部 API 使用 Pydantic Schema，OpenAPI 文档自动生成（`/docs`）
+- pytest 测试覆盖所有 CRUD endpoint（42 例，覆盖率 67%）
+- GitHub Actions CI：自动跑测试 + 类型检查 + 构建（`.github/workflows/ci.yml`）
+- Ruff + Black 代码规范（`pyproject.toml`）
+- 结构化日志配置（`dictConfig`）
+- 环境变量管理（`config.py` + `.env.example`）

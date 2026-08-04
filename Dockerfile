@@ -12,7 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 项目代码（排除 .git .venv node_modules）
-COPY app.py server.py models.py ./
+COPY app.py server.py models.py schemas.py config.py ./
 COPY alembic/ ./alembic/
 COPY alembic.ini .
 COPY auth.py room_manager.py op_handler.py ./

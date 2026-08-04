@@ -587,14 +587,14 @@ export function initTactic() {
     if (!tid) return;
     try {
       const packRes = await fetch(`/api/tactics/${tid}/pack`);
+      if (!packRes.ok) throw new Error(`HTTP ${packRes.status}`);
       const pack = await packRes.json();
-      if (pack.error) throw new Error(pack.error);
       const shareRes = await fetch('/api/share', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pack),
+        body: JSON.stringify({ tactic_data: pack }),
       });
+      if (!shareRes.ok) throw new Error(`HTTP ${shareRes.status}`);
       const shareData = await shareRes.json();
-      if (shareData.error) throw new Error(shareData.error);
       const url = `${location.origin}/view/${shareData.share_id}`;
       showToast(url);
     } catch (err: any) {
@@ -616,7 +616,6 @@ export function initTactic() {
         });
         if (!r.ok) throw new Error(await r.text());
         const t = await r.json();
-        if (t.error) throw new Error(t.error);
         await fetchTactics();
         selectTactic(t.id);
         alert(`已导入战术「${t.name}」（${t.steps.length} 步）`);
