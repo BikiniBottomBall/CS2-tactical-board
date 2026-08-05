@@ -259,7 +259,7 @@ function getDeadSlots(tick: number): Set<number> {
   return dead;
 }
 
-function applyKillState(tick: number) {
+function applyKillState(tick: number, flashBySlot: Record<number, number>) {
   if (!pack || !actorObjs.length) return;
   const rate = pack.meta.tick_rate;
   const rs = lastRoundStart(tick);
@@ -271,22 +271,86 @@ function applyKillState(tick: number) {
   for (let slot = 0; slot < actorObjs.length; slot++) {
     const obj = actorObjs[slot];
     if (!obj) continue;
-    applyActorBodyState(obj.group, dead.has(slot), slot === highlightSlot && !dead.has(slot));
+    const isDead = dead.has(slot);
+    const isHL = slot === highlightSlot && !isDead;
+    const isFlash = !isDead && (flashBySlot[slot] || 0) > 0.1;
+    applyActorBodyState(obj.group, isDead, isHL, isFlash);
   }
+  updateFlashRings(flashBySlot, dead);
   updateKillFeed(kills);
 }
 
-function applyActorBodyState(group, dead: boolean, highlight: boolean) {
+function applyActorBodyState(group, dead: boolean, highlight: boolean, flash: boolean) {
   const body = group.userData?.body;
   if (!body) return;
-  const st = group.userData.killState || (group.userData.killState = { dead: false, highlight: false });
-  if (st.dead === dead && st.highlight === highlight) return;
+  const st = group.userData.killState || (group.userData.killState = { dead: false, highlight: false, flash: false });
+  if (st.dead === dead && st.highlight === highlight && st.flash === flash) return;
   st.dead = dead;
   st.highlight = highlight;
+  st.flash = flash;
   body.rotation.x = dead ? -Math.PI / 2 : 0;
   const teamKey = group.userData.teamKey || 't';
-  const mat = dead ? _deadMat : (highlight ? _highlightMat : _actorMats[teamKey]);
+  const mat = dead ? _deadMat : ((flash || highlight) ? _highlightMat : _actorMats[teamKey]);
   body.traverse(o => { if (o.isMesh) o.material = mat; });
+}
+
+/* ---- 被闪头顶圆环指示器：白色圆弧 = 剩余被白时间比例（纯图形，无数字） ---- */
+const FLASH_FULL_S = 3; // 满闪按 3s 归算
+
+function createFlashRing(group) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const tex = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: false,
+  }));
+  sprite.scale.set(0.15, 0.15, 1);
+  sprite.position.y = 4.5;
+  sprite.renderOrder = 1003;
+  group.add(sprite);
+  return { sprite, canvas, tex };
+}
+
+function removeFlashRing(group) {
+  const ring = group.userData.flashRing;
+  if (!ring) return;
+  group.remove(ring.sprite);
+  ring.tex.dispose();
+  ring.sprite.material.dispose();
+  group.userData.flashRing = null;
+}
+
+function drawFlashRing(ring, progress: number) {
+  const ctx = ring.canvas.getContext('2d');
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath();
+  ctx.arc(64, 64, 45, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.95;
+  ctx.beginPath();
+  ctx.arc(64, 64, 45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ring.tex.needsUpdate = true;
+}
+
+function updateFlashRings(flashBySlot: Record<number, number>, dead: Set<number>) {
+  for (let slot = 0; slot < actorObjs.length; slot++) {
+    const obj = actorObjs[slot];
+    if (!obj) continue;
+    const g = obj.group;
+    const flash = flashBySlot[slot] || 0;
+    if (flash > 0.1 && !dead.has(slot)) {
+      if (!g.userData.flashRing) g.userData.flashRing = createFlashRing(g);
+      drawFlashRing(g.userData.flashRing, Math.min(flash / FLASH_FULL_S, 1));
+    } else if (g.userData.flashRing) {
+      removeFlashRing(g);
+    }
+  }
 }
 
 function updateKillFeed(kills: any[]) {
@@ -407,6 +471,7 @@ function renderFrame() {
   const k = Math.min(Math.max(fi - i0, 0), 1);
   const f0 = pack.frames[i0].p;
   const f1 = pack.frames[i1].p;
+  const flashBySlot: Record<number, number> = {};
 
   for (let slot = 0; slot < actorObjs.length; slot++) {
     const a = f0[slot], b = f1[slot];
@@ -421,6 +486,8 @@ function renderFrame() {
     const yaw = a && b ? lerpAngle(a[3], b[3], k) : src[3];
     obj.group.position.copy(snapGround(worldToScene(x, y, z, _v)));
     obj.group.rotation.y = sourceYawToRadians(yaw);
+    // P13.1：被白剩余时间（旧包无第 5 元素时取 0）
+    flashBySlot[slot] = Math.max(a ? (a[4] ?? 0) : 0, b ? (b[4] ?? 0) : 0);
   }
 
   // 道具事件：到点放效果
@@ -463,7 +530,7 @@ function renderFrame() {
   }
 
   // P12：击杀状态（倒地/高亮/kill feed）按当前时间快照同步
-  applyKillState(tick);
+  applyKillState(tick, flashBySlot);
 }
 
 function syncTimelineUI() {

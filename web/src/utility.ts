@@ -298,7 +298,6 @@ function stopPlaying() {
  * 共享几何与 Canvas 程序化纹理（自包含无外链），效果材质每实例独立；
  * effects[] 生命周期机制保持不变，tick 内不创建对象。
  * ---------------------------------------------------------- */
-let flashPeak = 0;          // 全屏白闪强度（多闪光弹取最强），帧末同步 DOM
 let _fxRes = null;
 
 function makeRadialTexture(stops: Array<[number, string]>, size = 128): THREE.CanvasTexture {
@@ -347,7 +346,7 @@ function ensureFxResources() {
 function spawnSmokeEffect(pt) {
   const res = ensureFxResources();
   const mat = new THREE.MeshBasicMaterial({
-    map: res.smokeTex, transparent: true, opacity: 0.5,
+    map: res.smokeTex, transparent: true, opacity: 0.88,
     depthWrite: true, depthTest: true,
   });
   const group = new THREE.Group();
@@ -371,7 +370,7 @@ function spawnSmokeEffect(pt) {
       group.scale.setScalar(0.6 + grow * 0.55); // 主团半径 2.6 → ~6
       for (let i = 0; i < subs.length; i++) {
         const a = (i / subs.length) * Math.PI * 2 + t * 0.32; // 缓慢翻滚
-        const r = 2.8 + (i % 3) * 0.9;
+        const r = 2.3 + (i % 3) * 0.6; // 子团内收，烟团更实心
         subs[i].position.set(
           Math.cos(a) * r,
           1.1 + (i % 2) * 1.7 + Math.sin(t * 0.9 + i * 1.3) * 0.5,
@@ -379,12 +378,12 @@ function spawnSmokeEffect(pt) {
         );
       }
       const fade = k > 0.9 ? (1 - k) / 0.1 : 1;
-      mat.opacity = 0.5 * fade * (0.4 + 0.6 * grow);
+      mat.opacity = 0.88 * fade * (0.55 + 0.45 * grow);
     },
   });
 }
 
-/* 闪光弹：全屏白闪叠加层 1.5s 衰减 + 落点高光爆球 */
+/* 闪光弹：落点白球爆闪 + 点光（0.5s，不覆盖观众屏幕） */
 function spawnFlashEffect(pt) {
   const res = ensureFxResources();
   const ball = new THREE.Mesh(res.flashGeo, new THREE.MeshBasicMaterial({
@@ -395,14 +394,11 @@ function spawnFlashEffect(pt) {
   light.position.copy(ball.position);
   fxGroup.add(ball, light);
   effects.push({
-    t: 0, life: 1.5, objs: [ball, light],
+    t: 0, life: 0.5, objs: [ball, light],
     tick(t, k) {
-      const burst = t < 0.35 ? 1 + (t / 0.35) * 6 : 7;
-      ball.scale.setScalar(burst);
-      const decay = Math.max(1 - t * 2.2, 0);
-      ball.material.opacity = 0.95 * decay;
-      light.intensity = 900 * decay;
-      flashPeak = Math.max(flashPeak, Math.max(1 - t / 1.4, 0));
+      ball.scale.setScalar(1 + k * 6);
+      ball.material.opacity = 0.95 * (1 - k);
+      light.intensity = 500 * (1 - k);
     },
   });
 }
@@ -522,10 +518,6 @@ export function updateUtility(dt) {
     }
   }
 
-  // P13：全屏白闪强度同步到 DOM 叠加层（帧末统一，多闪光弹取最强）
-  const flashEl = document.getElementById('flash-overlay');
-  if (flashEl) flashEl.style.opacity = String(Math.min(flashPeak, 1));
-  flashPeak = 0;
 }
 
 /* ------------------------------------------------------------

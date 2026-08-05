@@ -79,7 +79,7 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
         info_team, info_name = {}, {}
 
     # ---- 逐 tick 位置（全量解析后按 SAMPLE_EVERY 抽帧） ----
-    df = parser.parse_ticks(['X', 'Y', 'Z', 'yaw', 'steamid', 'team_num', 'name'])
+    df = parser.parse_ticks(['X', 'Y', 'Z', 'yaw', 'steamid', 'team_num', 'name', 'flash_duration'])
     df = df[df['tick'] % SAMPLE_EVERY == 0]
     max_tick = int(df['tick'].max())
 
@@ -109,16 +109,29 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
 
     # ---- 帧 ----
     frames = []
+    flash_state = {}  # slot -> {prev, start, dur}：推算递减的被白剩余秒数
     for tick, g in df.groupby('tick'):
         arr = [None] * len(players)
         for row in g.itertuples():
             slot = slot_of.get(str(row.steamid))
             if slot is None:
                 continue
+            raw_flash = 0.0 if math.isnan(row.flash_duration) else float(row.flash_duration)
             if math.isnan(row.X) or math.isnan(row.Y) or math.isnan(row.Z):
+                flash_state[slot] = {'prev': 0.0, 'start': tick, 'dur': 0.0}  # 死亡/未入场：清被闪区段
                 continue  # 死亡/未入场的实体坐标为 NaN，跳过（帧存 null）
             yaw = 0.0 if math.isnan(row.yaw) else row.yaw
-            arr[slot] = [r1(row.X), r1(row.Y), r1(row.Z), r1(yaw)]
+            st = flash_state.get(slot)
+            if raw_flash > 0:
+                # 新被闪区段：记录起点与满值；之后按时间递减（demoparser2 给的是区段恒定值）
+                if st is None or st['prev'] <= 0:
+                    st = flash_state[slot] = {'prev': raw_flash, 'start': tick, 'dur': raw_flash}
+                remaining = max(st['dur'] - (tick - st['start']) / tick_rate, 0)
+                st['prev'] = raw_flash
+            else:
+                flash_state[slot] = {'prev': 0.0, 'start': tick, 'dur': 0.0}
+                remaining = 0.0
+            arr[slot] = [r1(row.X), r1(row.Y), r1(row.Z), r1(yaw), r1(remaining)]
         frames.append({'t': int(tick), 'p': arr})
 
     # ---- 道具弹道（真实逐点，抽帧） ----
