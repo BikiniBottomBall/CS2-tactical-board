@@ -16,9 +16,11 @@ import { worldToScene } from './coords';
 
 const ACTOR_IDS = ['T1', 'T2', 'T3', 'T4', 'T5', 'CT1', 'CT2', 'CT3', 'CT4', 'CT5'];
 /* 出生点锚点（CS2 Source 世界坐标），经 worldToScene 换算到场景，
- * 与地图模型/demo 回放共用同一坐标变换，模型重导出后自动跟随 */
-const T_SPAWN_SRC = { x: 2128, y: 1472, z: 64 };  // 匪家默认区
-const CT_SPAWN_SRC = { x: -447, y: 3138, z: 64 }; // 警家默认区
+ * 与地图模型/demo 回放共用同一坐标变换，模型重导出后自动跟随。
+ * 坐标取自 CS2 官方 de_dust2.vpk 实体数据（info_player_* 原点均值，
+ * tools/s2v 解包 default_ents.vents，15 个出生点位） */
+const T_SPAWN_SRC = { x: -756, y: -791, z: 145 };  // 匪家（实体簇中心）
+const CT_SPAWN_SRC = { x: 281, y: 2269, z: -109 }; // 警家（实体簇中心）
 const THROW_INTERVAL = 0.8;  // 同一步内道具依次投出间隔（秒）
 const HOLD_TIME = 1.5;       // 步间停留（秒）
 
@@ -31,12 +33,12 @@ let currentStepIdx = -1;
 let panelOpen = false;
 
 /* actorPos 用 Proxy 包装：本地拖拽写入 → 100ms 节流发送 actor_move；
- * 远程写入通过 remoteActorMove（_remoteFlag 标记）不触发 sync 回环。 */
+ * 远程写入通过 remoteActorMove（_remoteFlag 标记）不触发 sync 回环。
+ * 注意：默认出生位不能在模块加载时填充（地图未就绪 worldToScene 无归一化），
+ * 一律走 ensureActorDefaults（首次打开面板时）惰性填充。 */
 const _rawActorPos: Record<string, {x:number,y:number,z:number}> = {};
 const _remoteFlag = new WeakSet<object>();
 const _lastActorSync: Record<string, number> = {};
-
-ACTOR_IDS.forEach(id => { _rawActorPos[id] = defaultActorPos(id); });
 
 const actorPos = new Proxy(_rawActorPos, {
   set(target, prop, value) {
@@ -121,11 +123,18 @@ function ensureActorDefaults() {
   ACTOR_IDS.forEach(id => { if (!actorPos[id]) actorPos[id] = defaultActorPos(id); });
 }
 
-function groundY(x, z, fallback) {
-  if (!mapGroup) return fallback;
+/* 贴地高度：取与参考高度 refY 最接近的命中层（而非最顶层），
+ * 多层结构（隧道/上下层）不会吸到顶板或屋顶 */
+function groundY(x, z, refY) {
+  if (!mapGroup) return refY;
   boardRaycaster.set(new THREE.Vector3(x, 500, z), _downDir);
   const hits = boardRaycaster.intersectObjects(mapGroup.children, false);
-  return hits.length ? hits[0].point.y : fallback;
+  if (!hits.length) return refY;
+  let best = hits[0].point.y;
+  for (const h of hits) {
+    if (Math.abs(h.point.y - refY) < Math.abs(best - refY)) best = h.point.y;
+  }
+  return best;
 }
 
 /* 远程演员位置同步：标记 _remoteFlag 避免 Proxy 回环，贴地 y */

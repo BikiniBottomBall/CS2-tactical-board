@@ -29,3 +29,8 @@ utility_check.png
 tactic_check*.png
 replay_check*.png
 tmp_check.png
+
+# ---- 本地工具与覆盖率产物 ----
+tools/s2v/
+.coverage
+spawn_*_real.png

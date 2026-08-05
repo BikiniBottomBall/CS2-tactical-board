@@ -12,7 +12,6 @@ import { scene, controls, mapBounds, setMapGroup, setMapBounds, setCollisionMesh
 import { resetCamera, setTopView } from './camera';
 import { restoreBoard } from './board';
 import { buildGrid } from './grid';
-import { buildRefmap } from './refmap';
 
 export function loadMap() {
   const bar = document.getElementById('load-bar');
@@ -137,11 +136,11 @@ function onMapReady() {
   resetCamera();
   restoreBoard(); // 恢复上次保存的标记和线条
   buildGrid();      // 坐标网格叠加层（正俯视+开关时显示）
-  buildRefmap();    // 参考图对照层（正俯视+开关时显示）
   window.__mapReady = true; // e2e 就绪信号
 
+  const params = new URLSearchParams(location.search);
   // 正俯视截图模式（?shot=1）
-  if (new URLSearchParams(location.search).has('shot')) {
+  if (params.has('shot')) {
     document.body.classList.add('shot');
     setTopView();
   }

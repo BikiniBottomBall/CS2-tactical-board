@@ -22,18 +22,3 @@ def test_demos_empty_and_404(client):
     assert client.delete("/api/demos/9999").status_code == 404
     assert client.get("/api/demos/9999/pack").status_code == 404
 
-
-def test_export_align(client, tmp_path, monkeypatch):
-    import app as app_module
-
-    monkeypatch.setattr(app_module, "ROOT", str(tmp_path))
-    r = client.post("/api/export-align", content=b"\x89PNG\r\n\x1a\nfake")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["ok"] is True
-    assert (tmp_path / "check_align.png").read_bytes() == b"\x89PNG\r\n\x1a\nfake"
-
-
-def test_export_align_empty(client):
-    r = client.post("/api/export-align")
-    assert r.status_code == 400

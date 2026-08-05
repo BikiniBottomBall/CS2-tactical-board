@@ -15,7 +15,8 @@ import { initUtility, updateUtility } from './utility';
 import { initTactic, updateTactic } from './tactic';
 import { initReplay, updateReplay } from './replay';
 import { initGrid, updateGrid } from './grid';
-import { initRefmap, updateRefmap } from './refmap';
+import * as _coords from './coords';
+import { initAnnotate } from './annotate';
 import { createRoom, joinRoom, leaveRoom, cleanupStaleCursors } from './sync';
 import { send } from './network';
 
@@ -26,6 +27,7 @@ declare global {
     __camera: any;
     __controls: any;
     __mapReady: boolean;
+    __probeLayers: (sx: number, sy: number, sz: number) => any;
   }
 }
 
@@ -80,13 +82,28 @@ function init() {
   window.__camera = camera;
   window.__controls = controls;
 
+  /* 校准探针：__probeLayers(sx, sy, sz) 输入游戏世界坐标，
+   * 返回场景坐标 + 该点向下射线的全部命中层（网格名/高度） */
+  window.__probeLayers = (sx, sy, sz) => {
+    const { worldToScene } = _coords;
+    const p = worldToScene(sx, sy, sz, new THREE.Vector3());
+    const ray = new THREE.Raycaster();
+    ray.set(new THREE.Vector3(p.x, 500, p.z), new THREE.Vector3(0, -1, 0));
+    const hits = S.mapGroup
+      ? ray.intersectObjects(S.mapGroup.children, false).map(h => ({
+          mesh: h.object.name, y: Math.round(h.point.y * 10) / 10,
+        }))
+      : [];
+    return { scene: p.toArray().map(v => Math.round(v * 10) / 10), layers: hits };
+  };
+
   initFlyControls();
   initBoard();
   initUtility();
   initTactic();
   initReplay();
   initGrid();
-  initRefmap();
+  initAnnotate();
   initTools(); // 最后：模式注册完毕后统一刷新侧边栏高亮
 
   // ---- P9 多人协同：房间 UI ----
@@ -156,7 +173,6 @@ function animate() {
   updateTactic(dt);  // 战术推演
   updateReplay(dt);  // demo 回放
   updateGrid();      // 网格显隐（跟随正俯视）
-  updateRefmap();   // 参考图显隐
   cleanupStaleCursors();  // P9-15: 清理超时远程光标
   S.controls.update();
   S.renderer.render(S.scene, S.camera);

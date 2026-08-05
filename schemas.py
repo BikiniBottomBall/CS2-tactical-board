@@ -32,6 +32,30 @@ class UtilityOut(UtilityBase):
     created_at: str | None = None
 
 
+class AnnotationBase(BaseModel):
+    type: str | None = None
+    x: float | None = None
+    y: float | None = None
+    z: float | None = None
+    points: list[list[float]] | None = None
+    height: float | None = None
+    floorY: float | None = None
+    parent: str | None = None
+    font_size: float | None = None
+    color: str | None = None
+    label_color: str | None = None
+    outline_color: str | None = None
+    opacity: float | None = None
+
+
+class AnnotationCreate(AnnotationBase):
+    name: str
+
+
+class AnnotationOut(AnnotationCreate):
+    pass
+
+
 class TacticCreate(BaseModel):
     name: str
     description: str | None = None

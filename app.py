@@ -24,7 +24,6 @@ from fastapi import (
     FastAPI,
     File,
     HTTPException,
-    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -38,6 +37,9 @@ from models import Annotation, DemoEvent, Match, ShareLink, Tactic, TacticStep, 
 from op_handler import handle_message
 from room_manager import broadcast, create_room, get_room, join_room, leave_room
 from schemas import (
+    AnnotationBase,
+    AnnotationCreate,
+    AnnotationOut,
     MatchOut,
     RoomClose,
     RoomCreate,
@@ -134,6 +136,63 @@ def replace_all_annotations(data: dict):
         for name, ann in data.items():
             db.add(Annotation(**ann_to_params(name, ann)))
         db.commit()
+
+
+# ---- annotations 点位标注 CRUD ----
+def annotation_params(dump: dict) -> dict:
+    """Pydantic model_dump -> SQLModel 列参数字典（points 序列化 JSON）"""
+    params = {}
+    for k, v in dump.items():
+        if v is None:
+            continue
+        if k == "points" and v is not None:
+            v = json.dumps(v, ensure_ascii=False)
+        params[k] = v
+    return params
+
+
+@app.get("/api/annotations", response_model=list[AnnotationOut])
+def list_annotations():
+    with Session(engine) as db:
+        rows = db.exec(select(Annotation)).all()
+        return [row_to_ann(r) for r in rows]
+
+
+@app.post("/api/annotations", response_model=AnnotationOut, status_code=201)
+def create_annotation(body: AnnotationCreate):
+    params = annotation_params(body.model_dump(exclude={"name"}))
+    with Session(engine) as db:
+        if db.get(Annotation, body.name) is not None:
+            raise HTTPException(status_code=409, detail=f"标注「{body.name}」已存在")
+        db.add(Annotation(name=body.name, **params))
+        db.commit()
+        row = db.get(Annotation, body.name)
+        return row_to_ann(row)
+
+
+@app.put("/api/annotations/{name}", response_model=AnnotationOut)
+def update_annotation(name: str, body: AnnotationBase):
+    params = annotation_params(body.model_dump())
+    with Session(engine) as db:
+        row = db.get(Annotation, name)
+        if row is None:
+            raise HTTPException(status_code=404, detail="标注不存在")
+        for k, v in params.items():
+            setattr(row, k, v)
+        db.add(row)
+        db.commit()
+        return row_to_ann(row)
+
+
+@app.delete("/api/annotations/{name}")
+def delete_annotation(name: str):
+    with Session(engine) as db:
+        row = db.get(Annotation, name)
+        if row is None:
+            raise HTTPException(status_code=404, detail="标注不存在")
+        db.delete(row)
+        db.commit()
+        return {"ok": True}
 
 
 @app.on_event("startup")
@@ -696,16 +755,6 @@ def import_all(data: dict = Body(...)):
     return {"ok": True}
 
 
-@app.post("/api/export-align")
-async def export_align(request: Request):
-    """对齐校验图：前端画布 PNG 写盘到项目根目录 check_align.png"""
-    data = await request.body()
-    if not data:
-        raise HTTPException(status_code=400, detail="empty body")
-    out = os.path.join(ROOT, "check_align.png")
-    with open(out, "wb") as f:
-        f.write(data)
-    return {"ok": True, "path": "check_align.png", "bytes": len(data)}
 
 
 @app.websocket("/ws/{room_code}")

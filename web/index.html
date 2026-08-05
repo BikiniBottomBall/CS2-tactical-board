@@ -99,8 +99,7 @@
   #sidebar.collapsed .sb-txt,
   #sidebar.collapsed .sb-title,
   #sidebar.collapsed .sb-field input,
-  #sidebar.collapsed .sb-field select,
-  #sidebar.collapsed .sb-nudge { display: none; }
+  #sidebar.collapsed .sb-field select { display: none; }
 
   #sidebar-toggle {
     align-self: flex-end;
@@ -177,14 +176,6 @@
   }
   .sb-field select option { background: #101620; }
 
-  .sb-nudge {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
-    padding: 2px 4px;
-  }
-  .sb-nudge button { justify-content: center; padding: 4px 0 !important; }
-
   /* ===== 道具库 ===== */
   #panel-utility {
     right: 16px; bottom: 16px;
@@ -195,6 +186,22 @@
     overflow-y: auto;
   }
   body.utility #panel-utility { display: block; }
+
+  /* ===== 点位标注 ===== */
+  #panel-annotate {
+    right: 16px; bottom: 16px;
+    width: 260px;
+    padding: 12px 14px;
+    display: none;
+    max-height: 48vh;
+    overflow-y: auto;
+  }
+  body.annotate #panel-annotate { display: block; }
+  #ann-list .calib-item button {
+    background: none; border: none; color: #8b98a8;
+    font-size: 12px; cursor: pointer; padding: 0 4px;
+  }
+  #ann-list .calib-item button:hover { color: #ff5252; }
   .util-group-title {
     font-size: 11px; color: #6b7888;
     margin: 8px 0 2px;
@@ -504,6 +511,7 @@
     <div class="sb-title">编辑</div>
     <button data-mode="select"><span class="sb-ico">➤</span><span class="sb-txt">选择移动</span></button>
     <button data-mode="brush"><span class="sb-ico">✏</span><span class="sb-txt">画笔</span></button>
+    <button data-mode="annotate"><span class="sb-ico">📍</span><span class="sb-txt">点位标注</span></button>
     <button data-mode="eraser"><span class="sb-ico">⌫</span><span class="sb-txt">橡皮擦</span></button>
     <button id="btn-undo"><span class="sb-ico">↶</span><span class="sb-txt">撤销</span></button>
     <button id="btn-clear"><span class="sb-ico">🗑</span><span class="sb-txt">清空</span></button>
@@ -527,22 +535,26 @@
   </div>
 
   <div class="sb-group">
-    <div class="sb-title">对齐</div>
+    <div class="sb-title">显示</div>
     <button id="btn-grid"><span class="sb-ico">🔲</span><span class="sb-txt">坐标网格</span></button>
-    <button id="btn-refmap"><span class="sb-ico">🗺</span><span class="sb-txt">参考图</span></button>
-    <div class="sb-field" title="参考图透明度"><span class="sb-ico">◐</span><input type="range" id="refmap-opacity" min="0" max="100" step="5" value="50"></div>
-    <div class="sb-nudge" title="参考图对齐微调">
-      <button id="refmap-left">←</button>
-      <button id="refmap-right">→</button>
-      <button id="refmap-up">↑</button>
-      <button id="refmap-down">↓</button>
-      <button id="refmap-zoomin">＋</button>
-      <button id="refmap-zoomout">－</button>
-      <button id="refmap-rot" title="旋转 90°">⟳</button>
-      <button id="refmap-reset" title="重置对齐">↺</button>
-    </div>
-    <button id="btn-export-align"><span class="sb-ico">📷</span><span class="sb-txt">导出校验图</span></button>
   </div>
+</div>
+
+<!-- ===== 点位标注面板 ===== -->
+<div id="panel-annotate" class="glass-panel">
+  <div class="calib-title">📍 点位标注</div>
+  <div class="calib-hint">左键点击地图取点 → 输入名称 → 保存</div>
+  <div class="calib-row">
+    <input id="ann-name" placeholder="名称（如 A大 / 中门）" style="flex:1;min-width:0;padding:5px 8px;font-size:12px;font-family:inherit;color:#dfe6ee;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);border-radius:8px;outline:none;">
+    <button id="ann-save" class="calib-mini-btn" style="flex:0 0 auto;padding:5px 10px;">保存</button>
+  </div>
+  <div id="ann-coords" class="calib-hint" style="color:#7ec8ff;font-family:Consolas,monospace">坐标：点击地图取点</div>
+  <div class="sb-title" style="margin-top:6px">标点显示</div>
+  <div class="sb-field" title="标点大小"><span class="sb-ico">●</span><input type="range" id="ann-size" min="0.4" max="2" step="0.1"><span class="sb-txt" id="ann-size-val">0.7x</span></div>
+  <div class="sb-field" title="标点透明度"><span class="sb-ico">◐</span><input type="range" id="ann-opacity" min="0.1" max="1" step="0.05"><span class="sb-txt" id="ann-opacity-val">100%</span></div>
+  <button id="ann-toggle-labels" class="calib-mini-btn" style="margin:2px 8px;padding:4px 8px;">🏷 标签</button>
+  <div class="sb-title" style="margin-top:6px">已标注</div>
+  <div id="ann-list" style="max-height:180px;overflow-y:auto"></div>
 </div>
 
 <!-- ===== 道具库面板 ===== -->

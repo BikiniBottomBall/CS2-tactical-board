@@ -1,9 +1,8 @@
-/* 综合验证：侧边栏/工具互斥/出生点回归/网格+参考图/导出校验图 */
+/* 综合验证：侧边栏/工具互斥/出生点回归/坐标网格 */
 import puppeteer from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import fs from 'node:fs';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 const PY = path.join(ROOT, '.venv/Scripts/python.exe');
@@ -109,24 +108,13 @@ try {
   check('Demo 面板开合', st.demo);
   await page.keyboard.press('Escape');
 
-  // 7. 网格 + 参考图 + 导出
+  // 7. 坐标网格
   await page.click('#btn-view-top');
   await new Promise(r => setTimeout(r, 600));
   await page.click('#btn-grid');
-  await page.click('#btn-refmap');
   await new Promise(r => setTimeout(r, 1500));
-  const overlayOk = await page.evaluate(() => ({
-    grid: window.__scene.getObjectByName('coord-grid')?.visible,
-    refmap: window.__scene.children.find(o => o.material?.map && o.renderOrder === 1000)?.visible,
-  }));
-  check('正俯视网格+参考图可见', overlayOk.grid === true && overlayOk.refmap === true, JSON.stringify(overlayOk));
-  await page.screenshot({ path: '../sb_align.png' });
-
-  const alignFile = path.join(ROOT, 'check_align.png');
-  if (fs.existsSync(alignFile)) fs.unlinkSync(alignFile);
-  await page.click('#btn-export-align');
-  await new Promise(r => setTimeout(r, 3000));
-  check('check_align.png 写盘', fs.existsSync(alignFile) && fs.statSync(alignFile).size > 10000);
+  const gridOk = await page.evaluate(() => window.__scene.getObjectByName('coord-grid')?.visible);
+  check('正俯视网格可见', gridOk === true, JSON.stringify(gridOk));
 } finally {
   await browser.close();
   server.kill();
