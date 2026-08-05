@@ -386,7 +386,11 @@ function seek(t) {
   time = Math.min(Math.max(t, 0), duration);
   if (pack) {
     const tick = time * pack.meta.tick_rate;
-    firedUtilIdx = pack.utility_events.filter(e => e.tick <= tick).length;
+    // 快照式补齐：跳到任意时刻时，只触发当前可见窗口（覆盖最长烟雾 15s）内的道具事件，
+    // 修复既有逻辑（原指针指向第一个未来事件导致落地效果从不触发），且避免跳转批量爆炸
+    const windowTicks = 16 * pack.meta.tick_rate;
+    let idx = pack.utility_events.findIndex(e => e.tick > tick - windowTicks);
+    firedUtilIdx = idx < 0 ? pack.utility_events.length : idx;
     renderFrame();
   }
   syncTimelineUI();

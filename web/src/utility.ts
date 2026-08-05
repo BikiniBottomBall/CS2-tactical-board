@@ -77,7 +77,8 @@ function disposeGroup(group) {
 
 function disposeObject(obj) {
   obj.traverse(o => {
-    if (o.geometry) o.geometry.dispose();
+    // 共享几何（P13 效果复用）不 dispose，避免影响仍在场的其它效果
+    if (o.geometry && !o.geometry.userData?.shared) o.geometry.dispose();
     if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
   });
 }
@@ -292,60 +293,199 @@ function stopPlaying() {
   playing = null;
 }
 
-export function spawnLandingEffect(u, pt) {  if (u.type === 'flash') {
-    // 闪：白色爆闪球 + 点光，0.5s
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(2, 16, 16),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false })
-    );
-    ball.position.copy(pt).y += 1;
-    const light = new THREE.PointLight(0xffffff, 500, 60);
-    light.position.copy(ball.position);
-    fxGroup.add(ball, light);
-    effects.push({
-      t: 0, life: 0.5, objs: [ball, light],
-      tick(t, k) {
-        ball.scale.setScalar(1 + k * 6);
-        ball.material.opacity = 0.95 * (1 - k);
-        light.intensity = 500 * (1 - k);
-      },
-    });
-  } else if (u.type === 'molotov') {
-    // 火：地面橙色圆盘脉动 + 橙光，3s 淡出
-    const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(3, 32),
-      new THREE.MeshBasicMaterial({ color: 0xff7043, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })
-    );
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.copy(pt).y += 0.15;
-    const light = new THREE.PointLight(0xff7043, 300, 40);
-    light.position.copy(pt).y += 3;
-    fxGroup.add(disc, light);
-    effects.push({
-      t: 0, life: 3, objs: [disc, light],
-      tick(t, k) {
-        disc.scale.setScalar(1 + 0.2 * Math.sin(t * 12));
-        disc.material.opacity = 0.85 * (1 - k);
-        light.intensity = (300 + 100 * Math.sin(t * 20)) * (1 - k);
-      },
-    });
-  } else {
-    // 烟：灰色半透明球扩散 ~4.5 倍，停 4s 后淡出
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(2.2, 20, 20),
-      new THREE.MeshLambertMaterial({ color: 0x9aa5ad, transparent: true, opacity: 0.55, depthWrite: false })
-    );
-    ball.position.copy(pt).y += 2;
-    fxGroup.add(ball);
-    effects.push({
-      t: 0, life: 5, objs: [ball],
-      tick(t, k) {
-        const grow = Math.min(t / 0.8, 1);
-        ball.scale.setScalar(1 + grow * 3.5);
-        ball.material.opacity = 0.55 * (k > 0.8 ? (1 - k) / 0.2 : 1);
-      },
-    });
+/* ------------------------------------------------------------
+ * P13 道具落地效果：烟雾（多球翻滚+遮挡）/ 闪光（全屏白闪+爆球）/ 燃烧（火海+黑烟）
+ * 共享几何与 Canvas 程序化纹理（自包含无外链），效果材质每实例独立；
+ * effects[] 生命周期机制保持不变，tick 内不创建对象。
+ * ---------------------------------------------------------- */
+let flashPeak = 0;          // 全屏白闪强度（多闪光弹取最强），帧末同步 DOM
+let _fxRes = null;
+
+function makeRadialTexture(stops: Array<[number, string]>, size = 128): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  for (const [off, rgba] of stops) g.addColorStop(off, rgba);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(c);
+}
+
+function ensureFxResources() {
+  if (_fxRes) return _fxRes;
+  const smokeGeo = new THREE.SphereGeometry(2, 14, 12);
+  const flameGeo = new THREE.PlaneGeometry(2.4, 2.4);
+  const flashGeo = new THREE.SphereGeometry(2, 16, 16);
+  // 共享几何标记：disposeObject 跳过，避免误释放其它在场效果
+  smokeGeo.userData.shared = flameGeo.userData.shared = flashGeo.userData.shared = true;
+  _fxRes = {
+    smokeGeo, flameGeo, flashGeo,
+    smokeTex: makeRadialTexture([
+      [0, 'rgba(238,241,245,1)'],
+      [0.35, 'rgba(228,232,237,0.82)'],
+      [0.7, 'rgba(216,221,227,0.34)'],
+      [1, 'rgba(210,215,221,0)'],
+    ]),
+    flameTex: makeRadialTexture([
+      [0, 'rgba(255,242,190,1)'],
+      [0.22, 'rgba(255,176,64,0.95)'],
+      [0.5, 'rgba(255,96,32,0.68)'],
+      [0.78, 'rgba(188,44,12,0.26)'],
+      [1, 'rgba(120,20,0,0)'],
+    ]),
+    blackTex: makeRadialTexture([
+      [0, 'rgba(72,72,78,0.85)'],
+      [0.5, 'rgba(56,56,62,0.45)'],
+      [1, 'rgba(40,40,46,0)'],
+    ]),
+  };
+  return _fxRes;
+}
+
+/* 烟雾弹：主团 + 8 子团翻滚扩散，depthWrite 遮挡人物，15s 后淡出 */
+function spawnSmokeEffect(pt) {
+  const res = ensureFxResources();
+  const mat = new THREE.MeshBasicMaterial({
+    map: res.smokeTex, transparent: true, opacity: 0.5,
+    depthWrite: true, depthTest: true,
+  });
+  const group = new THREE.Group();
+  const main = new THREE.Mesh(res.smokeGeo, mat);
+  main.position.y = 2.4;
+  main.scale.setScalar(2.6);
+  group.add(main);
+  const subs = [];
+  for (let i = 0; i < 8; i++) {
+    const m = new THREE.Mesh(res.smokeGeo, mat);
+    m.scale.setScalar(0.9 + (i % 3) * 0.35);
+    group.add(m);
+    subs.push(m);
   }
+  group.position.copy(pt);
+  fxGroup.add(group);
+  effects.push({
+    t: 0, life: 15, objs: [group],
+    tick(t, k) {
+      const grow = Math.min(t / 0.9, 1);
+      group.scale.setScalar(0.6 + grow * 0.55); // 主团半径 2.6 → ~6
+      for (let i = 0; i < subs.length; i++) {
+        const a = (i / subs.length) * Math.PI * 2 + t * 0.32; // 缓慢翻滚
+        const r = 2.8 + (i % 3) * 0.9;
+        subs[i].position.set(
+          Math.cos(a) * r,
+          1.1 + (i % 2) * 1.7 + Math.sin(t * 0.9 + i * 1.3) * 0.5,
+          Math.sin(a) * r
+        );
+      }
+      const fade = k > 0.9 ? (1 - k) / 0.1 : 1;
+      mat.opacity = 0.5 * fade * (0.4 + 0.6 * grow);
+    },
+  });
+}
+
+/* 闪光弹：全屏白闪叠加层 1.5s 衰减 + 落点高光爆球 */
+function spawnFlashEffect(pt) {
+  const res = ensureFxResources();
+  const ball = new THREE.Mesh(res.flashGeo, new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false,
+  }));
+  ball.position.copy(pt).y += 1;
+  const light = new THREE.PointLight(0xffffff, 900, 90);
+  light.position.copy(ball.position);
+  fxGroup.add(ball, light);
+  effects.push({
+    t: 0, life: 1.5, objs: [ball, light],
+    tick(t, k) {
+      const burst = t < 0.35 ? 1 + (t / 0.35) * 6 : 7;
+      ball.scale.setScalar(burst);
+      const decay = Math.max(1 - t * 2.2, 0);
+      ball.material.opacity = 0.95 * decay;
+      light.intensity = 900 * decay;
+      flashPeak = Math.max(flashPeak, Math.max(1 - t / 1.4, 0));
+    },
+  });
+}
+
+/* 燃烧弹：地面火海（贴地火斑 + 竖直火苗）+ 橙光闪烁 + 顶部黑烟，7s 熄灭 */
+function spawnMolotovEffect(pt) {
+  const res = ensureFxResources();
+  const group = new THREE.Group();
+  const flameMat = new THREE.MeshBasicMaterial({
+    map: res.flameTex, transparent: true, opacity: 0.85,
+    side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const smokeMat = new THREE.MeshBasicMaterial({
+    map: res.blackTex, transparent: true, opacity: 0.45, depthWrite: false,
+  });
+  const ground = [];
+  for (let i = 0; i < 4; i++) {
+    const p = new THREE.Mesh(res.flameGeo, flameMat);
+    p.rotation.x = -Math.PI / 2;
+    const a = (i / 4) * Math.PI * 2 + i * 0.7;
+    const r = 1.6 + (i % 3) * 0.9;
+    p.position.set(Math.cos(a) * r, 0.12, Math.sin(a) * r);
+    p.userData.base = new THREE.Vector3(1.3 + (i % 3) * 0.45, 1.3 + (i % 2) * 0.4, 1);
+    p.scale.copy(p.userData.base);
+    group.add(p);
+    ground.push(p);
+  }
+  const flames = [];
+  for (let i = 0; i < 3; i++) {
+    const p = new THREE.Mesh(res.flameGeo, flameMat);
+    p.position.set((i - 1) * 1.4 + (i % 2) * 0.4, 1.15, (i % 2) * 1.1 - 0.5);
+    p.rotation.y = i * 1.1;
+    p.userData.base = new THREE.Vector3(1.0 + (i % 2) * 0.5, 1.5 + i * 0.35, 1);
+    p.scale.copy(p.userData.base);
+    group.add(p);
+    flames.push(p);
+  }
+  const smokes = [];
+  for (let i = 0; i < 2; i++) {
+    const p = new THREE.Mesh(res.smokeGeo, smokeMat);
+    p.position.set((i ? 1 : -1) * 1.2, 2.4, 0.3);
+    p.scale.setScalar(0.9);
+    group.add(p);
+    smokes.push(p);
+  }
+  const light = new THREE.PointLight(0xff7043, 420, 36);
+  light.position.copy(pt).y += 3;
+  group.position.copy(pt);
+  fxGroup.add(group, light);
+  effects.push({
+    t: 0, life: 7, objs: [group, light],
+    tick(t, k) {
+      const grow = Math.min(t / 1.2, 1);
+      group.scale.setScalar(0.55 + grow * 0.75); // 火区扩散
+      const flick = 0.82 + 0.18 * Math.sin(t * 13);
+      const fade = k > 0.85 ? (1 - k) / 0.15 : 1;
+      flameMat.opacity = 0.85 * flick * fade;
+      ground.forEach((p, i) => {
+        const f = 0.9 + 0.14 * Math.sin(t * 6 + i * 1.6);
+        p.scale.set(p.userData.base.x * f, p.userData.base.y * f, 1);
+      });
+      flames.forEach((p, i) => {
+        const ph = t * 9 + i * 2.1;
+        p.scale.set(
+          p.userData.base.x * (0.85 + 0.22 * Math.sin(ph)),
+          p.userData.base.y * (0.85 + 0.22 * Math.sin(ph + 0.8)),
+          1
+        );
+      });
+      smokes.forEach(p => {
+        p.position.y = 2.4 + t * 0.5;
+        smokeMat.opacity = 0.45 * Math.min(t / 0.8, 1) * Math.max(1 - t / 6, 0) * fade;
+      });
+      light.intensity = (360 + 140 * Math.sin(t * 16)) * fade;
+    },
+  });
+}
+
+/* 落地效果入口（保持签名不变，战术推演与 demo 回放共用） */
+export function spawnLandingEffect(u, pt) {
+  if (u.type === 'flash') spawnFlashEffect(pt);
+  else if (u.type === 'molotov') spawnMolotovEffect(pt);
+  else spawnSmokeEffect(pt);
 }
 
 /* 主循环钩子：推进弹体 / 落地效果 / 落点环脉冲 */
@@ -381,6 +521,11 @@ export function updateUtility(dt) {
       e.tick(e.t, k);
     }
   }
+
+  // P13：全屏白闪强度同步到 DOM 叠加层（帧末统一，多闪光弹取最强）
+  const flashEl = document.getElementById('flash-overlay');
+  if (flashEl) flashEl.style.opacity = String(Math.min(flashPeak, 1));
+  flashPeak = 0;
 }
 
 /* ------------------------------------------------------------
