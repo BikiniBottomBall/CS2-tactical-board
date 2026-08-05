@@ -7,7 +7,7 @@
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
 import { scene, renderer, controls, mapGroup, isMultiplayer } from './state';
-import { MARKER_DEFS, r1 } from './config';
+import { ACTOR_DEFS, MARKER_DEFS, r1 } from './config';
 import { send } from './network';
 import { createMarkerSprite, boardRaycaster, setBoardPointer, raycastMapPoint } from './board';
 import { playUtility, getUtilityById, getUtilities } from './utility';
@@ -146,19 +146,57 @@ export function remoteActorMove(id: string, x: number, y: number, z: number): vo
   syncActor(id);
 }
 
-/* 演员视觉（小圆柱底座 + 标签精灵），tactic 演员与 demo 回放共用 */
+/* ---- 低模人形（tactic 演员与 demo 回放共用）----
+ * 组原点在脚底，人形正面朝局部 +z（与 sourceYawToRadians 兼容：yaw=0 面朝东）。
+ * 几何体与材质按队伍缓存共享，20 人同屏不重复创建。 */
+const _actorGeoCache: Record<string, any> = {};
+const _actorMatCache: Record<string, THREE.MeshLambertMaterial> = {};
+
+function getActorGeo() {
+  if (!_actorGeoCache.geo) {
+    _actorGeoCache.geo = {
+      leg:   new THREE.BoxGeometry(0.30, 0.80, 0.30),
+      torso: new THREE.BoxGeometry(1.10, 1.10, 0.55),
+      arm:   new THREE.BoxGeometry(0.22, 0.90, 0.24),
+      head:  new THREE.SphereGeometry(0.40, 16, 12),
+    };
+  }
+  return _actorGeoCache.geo;
+}
+
+function getActorMat(isT: boolean): THREE.MeshLambertMaterial {
+  const key = isT ? 't' : 'ct';
+  if (!_actorMatCache[key]) {
+    _actorMatCache[key] = new THREE.MeshLambertMaterial({ color: ACTOR_DEFS[key].color });
+  }
+  return _actorMatCache[key];
+}
+
 export function createActorVisual(label, isT) {
-  const def = isT ? MARKER_DEFS['marker-t'] : MARKER_DEFS['marker-ct'];
+  const key = isT ? 't' : 'ct';
+  const def = ACTOR_DEFS[key];
+  const geo = getActorGeo();
+  const mat = getActorMat(isT);
   const group = new THREE.Group();
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.7, 1.7, 0.5, 24),
-    new THREE.MeshLambertMaterial({ color: def.color })
-  );
-  base.position.y = 0.25;
-  group.add(base);
+
+  const legL = new THREE.Mesh(geo.leg, mat);
+  legL.position.set(-0.18, 0.40, 0);
+  const legR = new THREE.Mesh(geo.leg, mat);
+  legR.position.set(0.18, 0.40, 0);
+  const torso = new THREE.Mesh(geo.torso, mat);
+  torso.position.y = 1.35;
+  const armL = new THREE.Mesh(geo.arm, mat);
+  armL.position.set(-0.66, 1.30, 0);
+  const armR = new THREE.Mesh(geo.arm, mat);
+  armR.position.set(0.66, 1.30, 0);
+  const head = new THREE.Mesh(geo.head, mat);
+  head.position.y = 2.30;
+
+  group.add(legL, legR, torso, armL, armR, head);
+
   const sprite = createMarkerSprite(label, def.css);
   sprite.scale.set(0.13, 0.065, 1);
-  sprite.position.y = 3.4;
+  sprite.position.y = 3.5;
   group.add(sprite);
   return group;
 }

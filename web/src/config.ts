@@ -44,6 +44,13 @@ export const MARKER_DEFS = {
   'flash':     { label: '闪', color: 0xffe082, css: '#ffe082', big: false },
   'molotov':   { label: '火', color: 0xff7043, css: '#ff7043', big: false },
 };
+
+/* 演员（低模人形）队伍配色：T 金黄 / CT 蓝；仅人物、人物标签与回放视锥使用，
+ * 不影响画板 T/CT 临时标记（MARKER_DEFS）颜色 */
+export const ACTOR_DEFS = {
+  t:  { color: 0xf5c518, css: '#f5c518' },
+  ct: { color: 0x5aa9ff, css: '#5aa9ff' },
+};
 export const LINE_COLOR = 0xff5252;
 
 export const r1 = v => Math.round(v * 10) / 10;

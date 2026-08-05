@@ -6,7 +6,7 @@
  * ---------------------------------------------------------- */
 import * as THREE from 'three';
 import { scene, collisionMesh } from './state';
-import { MARKER_DEFS } from './config';
+import { ACTOR_DEFS, MARKER_DEFS } from './config';
 import { createActorVisual } from './tactic';
 import { spawnLandingEffect } from './utility';
 import { worldToScene, sourceYawToRadians } from './coords';
@@ -175,7 +175,7 @@ function buildActors() {
   for (const p of pack.players) {
     const group = createActorVisual(p.name, p.team === 'T');
     // yaw 视锥扇形（贴地半透明，指示朝向）
-    const def = p.team === 'T' ? MARKER_DEFS['marker-t'] : MARKER_DEFS['marker-ct'];
+    const def = ACTOR_DEFS[p.team === 'T' ? 't' : 'ct'];
     const cone = new THREE.Mesh(
       new THREE.CircleGeometry(2.4, 16, -0.5, 1.0),
       new THREE.MeshBasicMaterial({
