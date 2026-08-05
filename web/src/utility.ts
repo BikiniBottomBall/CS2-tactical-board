@@ -283,22 +283,25 @@ export function playUtility(u) {
     new THREE.MeshBasicMaterial({ color: def.color })
   );
   fxGroup.add(ball);
-  // P13.2：投掷轨迹（随弹体渐进画出，落地生效后缓慢淡出）
+  // P13.2.1：投掷轨迹（加色发光高亮，随弹体渐进画出；落地生效后 2s 正常淡出）
   const curve = buildCurve(u);
   const TRAIL_SEGS = 32;
   const trailGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(TRAIL_SEGS));
   trailGeo.setDrawRange(0, 1); // 初始只显示起点
   const trail = new THREE.Line(
     trailGeo,
-    new THREE.LineBasicMaterial({ color: def.color, transparent: true, opacity: 0.8, depthTest: false })
+    new THREE.LineBasicMaterial({
+      color: def.color, transparent: true, opacity: 0.95,
+      depthTest: false, blending: THREE.AdditiveBlending,
+    })
   );
   fxGroup.add(trail);
   effects.push({
-    t: 0, life: FLIGHT_TIME + 1.5, objs: [trail],
+    t: 0, life: FLIGHT_TIME + 2, objs: [trail],
     tick(t, k) {
-      // 飞行阶段保持 0.8 透明度；落地生效后 1.5s 淡出
-      const fade = t > FLIGHT_TIME ? Math.max(1 - (t - FLIGHT_TIME) / 1.5, 0) : 1;
-      trail.material.opacity = 0.8 * fade;
+      // 飞行阶段保持高亮；落地生效后 2s 正常速率淡出
+      const fade = t > FLIGHT_TIME ? Math.max(1 - (t - FLIGHT_TIME) / 2, 0) : 1;
+      trail.material.opacity = 0.95 * fade;
     },
   });
   playing = { u, curve, ball, trail, trailSegs: TRAIL_SEGS, t: 0 };

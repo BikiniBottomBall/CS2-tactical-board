@@ -507,7 +507,7 @@ function renderFrame() {
     const first = pts[0][0];
     const last = pts[pts.length - 1][0];
     if (tick < first) continue;
-    // P13.2：弹道轨迹（懒创建，随弹体渐进画出；落地/生效后 1.5s 淡出）
+    // P13.2.1：弹道轨迹（加色发光高亮，懒创建，随弹体渐进画出；落地/生效后 2s 正常淡出）
     let tr = grenadeTrails.get(g);
     if (!tr) {
       const linePts = pts.map(p => worldToScene(p[1], p[2], p[3], new THREE.Vector3()));
@@ -516,7 +516,10 @@ function renderFrame() {
       geo.setDrawRange(0, 1);
       const line = new THREE.Line(
         geo,
-        new THREE.LineBasicMaterial({ color: def.color, transparent: true, opacity: 0.55, depthTest: false })
+        new THREE.LineBasicMaterial({
+          color: def.color, transparent: true, opacity: 0.9,
+          depthTest: false, blending: THREE.AdditiveBlending,
+        })
       );
       line.visible = false;
       replayGroup.add(line);
@@ -526,7 +529,7 @@ function renderFrame() {
     if (tick <= last) {
       tr.fading = false;
       tr.line.visible = true;
-      tr.line.material.opacity = 0.55;
+      tr.line.material.opacity = 0.9;
       tr.line.geometry.setDrawRange(0, Math.max(1, Math.round(((tick - first) / (last - first)) * pts.length)));
     } else if (!tr.fading) {
       tr.fading = true; // 生效：开始淡出
@@ -560,7 +563,7 @@ function renderFrame() {
     if (!active.has(g)) mesh.visible = false;
   }
   // 弹道轨迹淡出推进与清理
-  const fadeRate = 1.5 * rate;
+  const fadeRate = 2 * rate;
   for (const [g, tr] of grenadeTrails) {
     if (!tr.fading) continue;
     const fadeK = (tick - tr.last) / fadeRate;
@@ -570,7 +573,7 @@ function renderFrame() {
       tr.line.material.dispose();
       grenadeTrails.delete(g);
     } else {
-      tr.line.material.opacity = 0.55 * (1 - fadeK);
+      tr.line.material.opacity = 0.9 * (1 - fadeK);
     }
   }
 
