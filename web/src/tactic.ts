@@ -192,7 +192,11 @@ export function createActorVisual(label, isT) {
   const head = new THREE.Mesh(geo.head, mat);
   head.position.y = 2.30;
 
-  group.add(legL, legR, torso, armL, armR, head);
+  // 身体网格包进 bodyGroup：demo 回放击杀倒地时仅旋转/变灰身体，标签与视锥不受影响
+  const body = new THREE.Group();
+  body.add(legL, legR, torso, armL, armR, head);
+  group.add(body);
+  group.userData.body = body;
 
   const sprite = createMarkerSprite(label, def.css);
   sprite.scale.set(0.13, 0.065, 1);

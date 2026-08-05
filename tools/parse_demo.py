@@ -177,8 +177,20 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
             weapon = str(getattr(r, 'weapon', '') or '').replace('weapon_', '')
             if not attacker or str(attacker) == 'nan':
                 continue
-            events.append({'tick': int(r.tick), 'type': 'kill',
-                           'label': f'{attacker} 击杀 {user}（{weapon}）'})
+            hd = getattr(r, 'headshot', False)
+            headshot = bool(hd) if not (isinstance(hd, float) and math.isnan(hd)) else False
+            label = f'{attacker} 击杀 {user}（{weapon}）'
+            if headshot:
+                label += '（爆头）'
+            events.append({
+                'tick': int(r.tick),
+                'type': 'kill',
+                'label': label,
+                'attacker': str(attacker),
+                'user': str(user),
+                'weapon': weapon,
+                'headshot': headshot,
+            })
     bp = ev.get('bomb_planted')
     if bp is not None and hasattr(bp, 'itertuples'):
         for r in bp.itertuples():

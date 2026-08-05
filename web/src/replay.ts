@@ -53,6 +53,20 @@ const projectilePool = new Map(); // entity -> mesh
 
 const _v = new THREE.Vector3();
 
+/* ---- P12 击杀状态：kill feed / 倒地 / 击杀者高亮 ---- */
+const KILL_FEED_WINDOW_S = 3.5;
+const KILL_HIGHLIGHT_S = 1.0;
+const _deadMat = new THREE.MeshLambertMaterial({ color: 0x6b7280 });
+const _highlightMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+const _actorMats: Record<string, THREE.MeshLambertMaterial> = {
+  t: new THREE.MeshLambertMaterial({ color: ACTOR_DEFS.t.color }),
+  ct: new THREE.MeshLambertMaterial({ color: ACTOR_DEFS.ct.color }),
+};
+let killEvents: any[] = [];
+let roundStartTicks: number[] = [];
+let nameToSlot = new Map<string, number>();
+let lastFeedKey = '';
+
 function disposeChildren(group) {
   while (group.children.length) {
     const c = group.children.pop();
@@ -164,16 +178,167 @@ function unloadPack() {
   disposeChildren(replayGroup);
   replayGroup.visible = false;
   actorObjs.length = 0;
+  killEvents = [];
+  roundStartTicks = [];
+  nameToSlot.clear();
+  lastFeedKey = '';
+  const kf = document.getElementById('kill-feed');
+  if (kf) kf.innerHTML = '';
   document.getElementById('replay-bar').style.display = 'none';
   document.getElementById('replay-play').textContent = '▶';
+}
+
+/* ---- P12 击杀索引与时间驱动状态 ---- */
+function buildKillIndex() {
+  nameToSlot = new Map();
+  (pack.players || []).forEach((p, i) => {
+    if (!nameToSlot.has(p.name)) nameToSlot.set(p.name, i);
+  });
+  roundStartTicks = (pack.events || [])
+    .filter(e => e.type === 'round_start')
+    .map(e => e.tick)
+    .sort((a, b) => a - b);
+  killEvents = (pack.events || [])
+    .filter(e => e.type === 'kill')
+    .map(normalizeKill)
+    .sort((a, b) => a.tick - b.tick);
+}
+
+function normalizeKill(e) {
+  let attacker = e.attacker, user = e.user, weapon = e.weapon, headshot = e.headshot;
+  if (attacker == null || user == null) {
+    // 旧 pack 回退：label 形如「A 击杀 B（weapon）（爆头）」
+    const m = /^(.+?) 击杀 (.+?)（(.+?)）/.exec(e.label || '');
+    if (m) {
+      attacker = m[1];
+      user = m[2];
+      weapon = m[3].replace(/（爆头）$/, '');
+    }
+    headshot = /（爆头）/.test(e.label || '');
+  }
+  return {
+    tick: e.tick,
+    attacker: attacker != null ? String(attacker) : '',
+    user: user != null ? String(user) : '',
+    weapon: String(weapon || '').replace('weapon_', ''),
+    headshot: !!headshot,
+    attackerSlot: nameToSlot.has(attacker) ? nameToSlot.get(attacker) : -1,
+    victimSlot: nameToSlot.has(user) ? nameToSlot.get(user) : -1,
+    label: e.label || '',
+  };
+}
+
+function lastRoundStart(tick: number): number {
+  let rs = 0;
+  for (const t of roundStartTicks) {
+    if (t <= tick) rs = t;
+    else break;
+  }
+  return rs;
+}
+
+function getKillsInWindow(tick: number, winS: number, rs: number): any[] {
+  const minTick = tick - winS * pack.meta.tick_rate;
+  const out = [];
+  for (const k of killEvents) {
+    if (k.tick > tick) break;
+    if (k.tick < minTick || k.tick < rs) continue;
+    out.push(k);
+  }
+  return out;
+}
+
+function getDeadSlots(tick: number): Set<number> {
+  const rs = lastRoundStart(tick);
+  const dead = new Set<number>();
+  for (const k of killEvents) {
+    if (k.tick > tick) break;
+    if (k.tick < rs || k.victimSlot < 0) continue;
+    dead.add(k.victimSlot);
+  }
+  return dead;
+}
+
+function applyKillState(tick: number) {
+  if (!pack || !actorObjs.length) return;
+  const rate = pack.meta.tick_rate;
+  const rs = lastRoundStart(tick);
+  const dead = getDeadSlots(tick);
+  const kills = getKillsInWindow(tick, KILL_FEED_WINDOW_S, rs);
+  const latest = kills.length ? kills[kills.length - 1] : null;
+  const highlightSlot = latest && tick - latest.tick <= KILL_HIGHLIGHT_S * rate ? latest.attackerSlot : -1;
+
+  for (let slot = 0; slot < actorObjs.length; slot++) {
+    const obj = actorObjs[slot];
+    if (!obj) continue;
+    applyActorBodyState(obj.group, dead.has(slot), slot === highlightSlot && !dead.has(slot));
+  }
+  updateKillFeed(kills);
+}
+
+function applyActorBodyState(group, dead: boolean, highlight: boolean) {
+  const body = group.userData?.body;
+  if (!body) return;
+  const st = group.userData.killState || (group.userData.killState = { dead: false, highlight: false });
+  if (st.dead === dead && st.highlight === highlight) return;
+  st.dead = dead;
+  st.highlight = highlight;
+  body.rotation.x = dead ? -Math.PI / 2 : 0;
+  const teamKey = group.userData.teamKey || 't';
+  const mat = dead ? _deadMat : (highlight ? _highlightMat : _actorMats[teamKey]);
+  body.traverse(o => { if (o.isMesh) o.material = mat; });
+}
+
+function updateKillFeed(kills: any[]) {
+  const el = document.getElementById('kill-feed');
+  if (!el) return;
+  const key = kills.map(k => `${k.tick}:${k.attacker}>${k.user}:${k.headshot}`).join('|');
+  if (key === lastFeedKey) return;
+  lastFeedKey = key;
+  el.innerHTML = '';
+  for (const k of kills) {
+    const row = document.createElement('div');
+    row.className = 'kf-row';
+    if (!k.attacker && !k.user) {
+      row.textContent = k.label || '';
+      el.appendChild(row);
+      continue;
+    }
+    const a = document.createElement('span');
+    a.className = 'kf-name ' + teamClass(k.attackerSlot);
+    a.textContent = k.attacker;
+    const w = document.createElement('span');
+    w.className = 'kf-weapon';
+    w.textContent = k.weapon || '?';
+    const v = document.createElement('span');
+    v.className = 'kf-name ' + teamClass(k.victimSlot);
+    v.textContent = k.user;
+    row.append(a, w, v);
+    if (k.headshot) {
+      const hs = document.createElement('span');
+      hs.className = 'kf-headshot';
+      hs.textContent = '爆头';
+      row.appendChild(hs);
+    }
+    el.appendChild(row);
+  }
+}
+
+function teamClass(slot: number): string {
+  if (slot >= 0 && pack.players && pack.players[slot]) {
+    return pack.players[slot].team === 'T' ? 'kf-t' : 'kf-ct';
+  }
+  return '';
 }
 
 function buildActors() {
   disposeChildren(replayGroup);
   projectilePool.clear();
   actorObjs.length = 0;
+  buildKillIndex();
   for (const p of pack.players) {
     const group = createActorVisual(p.name, p.team === 'T');
+    group.userData.teamKey = p.team === 'T' ? 't' : 'ct';
     // yaw 视锥扇形（贴地半透明，指示朝向）
     const def = ACTOR_DEFS[p.team === 'T' ? 't' : 'ct'];
     const cone = new THREE.Mesh(
@@ -292,6 +457,9 @@ function renderFrame() {
   for (const [entity, mesh] of projectilePool) {
     if (!active.has(entity)) mesh.visible = false;
   }
+
+  // P12：击杀状态（倒地/高亮/kill feed）按当前时间快照同步
+  applyKillState(tick);
 }
 
 function syncTimelineUI() {
