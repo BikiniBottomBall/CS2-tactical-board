@@ -33,15 +33,15 @@ try {
   await new Promise(r => setTimeout(r, 800));
 
   // 斜 45° 默认视角下按时间点截图
-  for (const t of [0, 6, 12, 18, 24]) {
+  for (const t of [50, 120, 300, 600]) {
     await page.evaluate((tt) => {
       const s = document.getElementById('replay-slider');
       s.value = String(tt);
       s.dispatchEvent(new Event('input'));
     }, t);
     await new Promise(r => setTimeout(r, 700));
-    await page.screenshot({ path: `../replay_fix_${t}s.png` });
-    console.log('saved', `replay_fix_${t}s.png`);
+    await page.screenshot({ path: `../replay_5e_${t}s.png` });
+    console.log('saved', `replay_5e_${t}s.png`);
   }
 } finally {
   await browser.close();

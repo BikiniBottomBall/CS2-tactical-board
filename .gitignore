@@ -28,6 +28,7 @@ calib_check.png
 utility_check.png
 tactic_check*.png
 replay_check*.png
+replay_5e_*.png
 tmp_check.png
 
 # ---- 本地工具与覆盖率产物 ----

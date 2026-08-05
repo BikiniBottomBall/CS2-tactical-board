@@ -10,6 +10,7 @@ uvicorn==0.51.0
 python-multipart
 psycopg2-binary>=2.9
 demoparser2==0.39.0
+pyarrow==17.0.0
 
 # 测试
 pytest>=8.0
