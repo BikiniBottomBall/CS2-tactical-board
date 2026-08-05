@@ -59,10 +59,9 @@ function renderAnnotation(data: any) {
   pointGroup.scale.setScalar(annSize);
   group.add(pointGroup);
 
-  // 名称标签：随镜头缩放（近大远小），拉远不遮挡标点；可整体隐藏
   const sprite = createMarkerSprite(data.name, annColor(data));
-  sprite.material.sizeAttenuation = true;
-  sprite.scale.set(24, 12, 1);
+  // 名称标签：屏幕恒定大小（不随镜头缩放），远距/俯视清晰可读
+  sprite.scale.set(0.13, 0.065, 1);
   sprite.position.set(0, 7, 0);
   sprite.visible = labelsOn;
   group.add(sprite);

@@ -49,7 +49,10 @@ const replayGroup = new THREE.Group();
 replayGroup.name = 'demo-replay';
 replayGroup.visible = false;
 const actorObjs = [];      // slot -> { group }
-const projectilePool = new Map(); // entity -> mesh
+// 注意：CS2 entity id 会被复用（pack.grenades 中同 entity 可对应多个投掷物），
+// 因此以 grenade 对象本身为 key（对象引用唯一），避免轨迹/弹道球状态互相覆盖。
+const projectilePool = new Map(); // grenade -> mesh
+const grenadeTrails = new Map();  // grenade -> { line, first, last, fading }：弹道轨迹（生效后淡出）
 
 const _v = new THREE.Vector3();
 
@@ -174,10 +177,11 @@ function unloadPack() {
   playing = false;
   time = 0;
   firedUtilIdx = 0;
-  projectilePool.clear();
   disposeChildren(replayGroup);
   replayGroup.visible = false;
   actorObjs.length = 0;
+  projectilePool.clear();
+  grenadeTrails.clear();
   killEvents = [];
   roundStartTicks = [];
   nameToSlot.clear();
@@ -500,9 +504,36 @@ function renderFrame() {
   const active = new Set();
   for (const g of pack.grenades) {
     const pts = g.points;
-    if (tick < pts[0][0] || tick > pts[pts.length - 1][0]) continue;
-    active.add(g.entity);
-    let mesh = projectilePool.get(g.entity);
+    const first = pts[0][0];
+    const last = pts[pts.length - 1][0];
+    if (tick < first) continue;
+    // P13.2：弹道轨迹（懒创建，随弹体渐进画出；落地/生效后 1.5s 淡出）
+    let tr = grenadeTrails.get(g);
+    if (!tr) {
+      const linePts = pts.map(p => worldToScene(p[1], p[2], p[3], new THREE.Vector3()));
+      const def = MARKER_DEFS[g.type] || MARKER_DEFS.smoke;
+      const geo = new THREE.BufferGeometry().setFromPoints(linePts);
+      geo.setDrawRange(0, 1);
+      const line = new THREE.Line(
+        geo,
+        new THREE.LineBasicMaterial({ color: def.color, transparent: true, opacity: 0.55, depthTest: false })
+      );
+      line.visible = false;
+      replayGroup.add(line);
+      tr = { line, first, last, fading: false };
+      grenadeTrails.set(g, tr);
+    }
+    if (tick <= last) {
+      tr.fading = false;
+      tr.line.visible = true;
+      tr.line.material.opacity = 0.55;
+      tr.line.geometry.setDrawRange(0, Math.max(1, Math.round(((tick - first) / (last - first)) * pts.length)));
+    } else if (!tr.fading) {
+      tr.fading = true; // 生效：开始淡出
+    }
+    if (tick > last) continue;
+    active.add(g);
+    let mesh = projectilePool.get(g);
     if (!mesh) {
       const def = MARKER_DEFS[g.type] || MARKER_DEFS.smoke;
       mesh = new THREE.Mesh(
@@ -510,7 +541,7 @@ function renderFrame() {
         new THREE.MeshBasicMaterial({ color: def.color })
       );
       replayGroup.add(mesh);
-      projectilePool.set(g.entity, mesh);
+      projectilePool.set(g, mesh);
     }
     mesh.visible = true;
     let j = 0;
@@ -525,8 +556,22 @@ function renderFrame() {
       _v
     ));
   }
-  for (const [entity, mesh] of projectilePool) {
-    if (!active.has(entity)) mesh.visible = false;
+  for (const [g, mesh] of projectilePool) {
+    if (!active.has(g)) mesh.visible = false;
+  }
+  // 弹道轨迹淡出推进与清理
+  const fadeRate = 1.5 * rate;
+  for (const [g, tr] of grenadeTrails) {
+    if (!tr.fading) continue;
+    const fadeK = (tick - tr.last) / fadeRate;
+    if (fadeK >= 1) {
+      replayGroup.remove(tr.line);
+      tr.line.geometry.dispose();
+      tr.line.material.dispose();
+      grenadeTrails.delete(g);
+    } else {
+      tr.line.material.opacity = 0.55 * (1 - fadeK);
+    }
   }
 
   // P12：击杀状态（倒地/高亮/kill feed）按当前时间快照同步
