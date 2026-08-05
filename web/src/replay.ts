@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { scene, collisionMesh } from './state';
 import { ACTOR_DEFS, MARKER_DEFS } from './config';
 import { createActorVisual } from './tactic';
-import { spawnLandingEffect } from './utility';
+import { clearLandingEffects, spawnLandingEffect } from './utility';
 import { worldToScene, sourceYawToRadians } from './coords';
 import { boardRaycaster } from './board';
 import { registerMode } from './tools';
@@ -23,15 +23,73 @@ const _down = new THREE.Vector3(0, -1, 0);
 const _rayOrigin = new THREE.Vector3();
 
 /* 高度吸附：从演员位置上方 4 单位向下打射线（走 BVH 地面层），
- * 命中点落在下方 8 单位窗口内则贴地，防止转换残差导致浮空/埋地；
- * 从演员自身高度起算，隧道内不会吸到上层地面 */
+ * 仅当命中点与当前高度差在 0.8 单位内才贴地（保留跳跃/空中高度，
+ * 只修正转换残差），隧道内不会吸到上层地面 */
 function snapGround(pos) {
   if (!collisionMesh) return pos;
   _rayOrigin.set(pos.x, pos.y + 4, pos.z);
   boardRaycaster.set(_rayOrigin, _down);
   const hits = boardRaycaster.intersectObject(collisionMesh, false);
-  if (hits.length && hits[0].point.y > pos.y - 8) pos.y = hits[0].point.y;
+  if (hits.length && hits[0].point.y > pos.y - 0.8) pos.y = hits[0].point.y;
   return pos;
+}
+
+/* 地面高度：从参考高度上方 4 单位向下射线命中 BVH 地面层，返回地面 y（无命中返回 0） */
+function groundHeightAt(x, z, refY) {
+  if (!collisionMesh) return 0;
+  _rayOrigin.set(x, refY + 4, z);
+  boardRaycaster.set(_rayOrigin, _down);
+  const hits = boardRaycaster.intersectObject(collisionMesh, false);
+  // 跳过头顶上方的结构（隧道/房顶），取脚下最近的地面
+  for (const h of hits) {
+    if (h.point.y <= refY + 0.8) return h.point.y;
+  }
+  return 0;
+}
+
+/* P13.2.2：跳跃姿态动画（空中前倾 + 四肢摆动 + 落地缓冲），仅回放调用 */
+const JUMP_AIR_H = 0.18;   // 高于地面此值视为空中
+const JUMP_BUFFER_S = 0.12;
+
+function applyJumpMotion(group, h: number, vy: number, tick: number) {
+  const body = group.userData?.body;
+  if (!body) return;
+  if (group.userData.killState?.dead) return; // 死亡玩家不跳
+  const parts = body.userData?.parts;
+  const m = group.userData.motion || (group.userData.motion = { prevH: 0, prevVy: 0, buffer: 0 });
+
+  const airborne = h > JUMP_AIR_H;
+  const ph = (tick / 64) * 9; // 摆动相位
+
+  if (!airborne) {
+    // 落地缓冲：从较高处快速回落触地瞬间压扁
+    if (m.prevH > 0.4 && h < 0.2) m.buffer = JUMP_BUFFER_S;
+    body.rotation.x = 0;
+    body.scale.setScalar(1);
+    if (parts) {
+      parts.armL.rotation.x = 0;
+      parts.armR.rotation.x = 0;
+      parts.legL.rotation.x = 0;
+      parts.legR.rotation.x = 0;
+    }
+    if (m.buffer > 0) {
+      body.scale.set(1.08, 0.92, 1.08);
+      m.buffer = Math.max(m.buffer - 1 / 64, 0);
+    }
+  } else {
+    // 空中：前倾 + 双臂后摆 + 双腿微屈（起跳姿态）
+    body.rotation.x = 0.18;
+    body.scale.set(1, 1.06, 1);
+    if (parts) {
+      parts.armL.rotation.x = -0.75 + Math.sin(ph) * 0.18;
+      parts.armR.rotation.x = -0.75 - Math.sin(ph) * 0.18;
+      parts.legL.rotation.x = -0.28;
+      parts.legR.rotation.x = 0.22;
+    }
+  }
+
+  m.prevH = h;
+  m.prevVy = vy;
 }
 
 let demos = [];
@@ -66,9 +124,11 @@ const _actorMats: Record<string, THREE.MeshLambertMaterial> = {
   ct: new THREE.MeshLambertMaterial({ color: ACTOR_DEFS.ct.color }),
 };
 let killEvents: any[] = [];
+let flashEvents: any[] = [];   // { slot, start, end, dur }：被闪状态（起点对齐闪光爆点事件）
 let roundStartTicks: number[] = [];
 let nameToSlot = new Map<string, number>();
 let lastFeedKey = '';
+let clearedRoundIdx = 0;   // 已执行回合清理的 round_start 数量（跨局清理用）
 
 function disposeChildren(group) {
   while (group.children.length) {
@@ -183,9 +243,11 @@ function unloadPack() {
   projectilePool.clear();
   grenadeTrails.clear();
   killEvents = [];
+  flashEvents = [];
   roundStartTicks = [];
   nameToSlot.clear();
   lastFeedKey = '';
+  clearedRoundIdx = 0;
   const kf = document.getElementById('kill-feed');
   if (kf) kf.innerHTML = '';
   document.getElementById('replay-bar').style.display = 'none';
@@ -206,6 +268,42 @@ function buildKillIndex() {
     .filter(e => e.type === 'kill')
     .map(normalizeKill)
     .sort((a, b) => a.tick - b.tick);
+  buildFlashIndex();
+}
+
+/* P13.2.2 修复：被闪状态改为事件驱动——从帧数据提取每个玩家的被闪区段，
+ * 并把区段起点对齐到最近的闪光爆点事件 tick（避免帧插值导致“效果未出先被闪”） */
+function buildFlashIndex() {
+  flashEvents = [];
+  const flashTicks = (pack.utility_events || [])
+    .filter(e => e.type === 'flash')
+    .map(e => e.tick);
+  const pushSeg = (slot, startTick, dur, endTick) => {
+    // 对齐最近的闪光爆点（±16 tick 内取最近）
+    let best = -1, bestDist = Infinity;
+    for (const ft of flashTicks) {
+      if (ft >= startTick - 16 && ft <= startTick + 8) {
+        const d = Math.abs(ft - startTick);
+        if (d < bestDist) { bestDist = d; best = ft; }
+      }
+    }
+    flashEvents.push({ slot, start: best >= 0 ? best : startTick, end: endTick, dur });
+  };
+  const n = (pack.players || []).length;
+  for (let slot = 0; slot < n; slot++) {
+    let segStart = -1, segDur = 0;
+    for (const fr of pack.frames) {
+      const p = fr.p[slot];
+      const v = p ? (p[4] ?? 0) : 0;
+      if (v > 0.1) {
+        if (segStart < 0) { segStart = fr.t; segDur = v; }
+      } else if (segStart >= 0) {
+        pushSeg(slot, segStart, segDur, fr.t);
+        segStart = -1;
+      }
+    }
+    if (segStart >= 0) pushSeg(slot, segStart, segDur, Number.MAX_SAFE_INTEGER);
+  }
 }
 
 function normalizeKill(e) {
@@ -469,6 +567,23 @@ function renderFrame() {
   const rate = pack.meta.tick_rate;
   const se = pack.meta.sample_every;
   const tick = time * rate;
+  // 回合切换：清理上一局残留的道具轨迹 / 弹道球 / 落地效果
+  while (clearedRoundIdx < roundStartTicks.length && tick >= roundStartTicks[clearedRoundIdx]) {
+    clearLandingEffects();
+    for (const [, tr] of grenadeTrails) {
+      replayGroup.remove(tr.line);
+      tr.line.geometry.dispose();
+      tr.line.material.dispose();
+    }
+    grenadeTrails.clear();
+    for (const [, mesh] of projectilePool) {
+      replayGroup.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+    projectilePool.clear();
+    clearedRoundIdx++;
+  }
   const fi = tick / se;
   const i0 = Math.min(Math.floor(fi), pack.frames.length - 1);
   const i1 = Math.min(i0 + 1, pack.frames.length - 1);
@@ -476,6 +591,12 @@ function renderFrame() {
   const f0 = pack.frames[i0].p;
   const f1 = pack.frames[i1].p;
   const flashBySlot: Record<number, number> = {};
+  for (const fe of flashEvents) {
+    if (tick >= fe.start && tick < fe.end) {
+      const rem = fe.dur - (tick - fe.start) / rate;
+      if (rem > 0.1) flashBySlot[fe.slot] = Math.max(flashBySlot[fe.slot] || 0, rem);
+    }
+  }
 
   for (let slot = 0; slot < actorObjs.length; slot++) {
     const a = f0[slot], b = f1[slot];
@@ -483,15 +604,24 @@ function renderFrame() {
     if (!obj) continue;
     const src = a || b;
     if (!src) { obj.group.visible = false; continue; }
+    // 过滤 [0,0,0] 占位（玩家不在场时坐标归零），避免假位置干扰回放与跳跃判定
+    if (Math.abs(src[0]) < 0.01 && Math.abs(src[1]) < 0.01) { obj.group.visible = false; continue; }
     obj.group.visible = true;
     const x = a && b ? a[0] + (b[0] - a[0]) * k : src[0];
     const y = a && b ? a[1] + (b[1] - a[1]) * k : src[1];
     const z = a && b ? a[2] + (b[2] - a[2]) * k : src[2];
     const yaw = a && b ? lerpAngle(a[3], b[3], k) : src[3];
-    obj.group.position.copy(snapGround(worldToScene(x, y, z, _v)));
+    worldToScene(x, y, z, _v);
+    const rawY = _v.y;
+    const ground = groundHeightAt(_v.x, _v.z, rawY);
+    obj.group.position.copy(snapGround(_v));
+    const h = rawY - ground;
+    const gm = obj.group.userData.motion || (obj.group.userData.motion = {});
+    const dt = Math.max((tick - (gm.prevTick ?? tick)) / rate, 0.001);
+    const vy = (h - (gm.prevH ?? h)) / dt;
+    gm.prevTick = tick;
+    applyJumpMotion(obj.group, h, vy, tick);
     obj.group.rotation.y = sourceYawToRadians(yaw);
-    // P13.1：被白剩余时间（旧包无第 5 元素时取 0）
-    flashBySlot[slot] = Math.max(a ? (a[4] ?? 0) : 0, b ? (b[4] ?? 0) : 0);
   }
 
   // 道具事件：到点放效果

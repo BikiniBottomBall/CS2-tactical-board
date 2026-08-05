@@ -31,8 +31,9 @@ export function sceneToSource(sceneV, out) {
   return v;
 }
 
-/* Source yaw（度，绕 z 轴 CCW，0=+x）→ three 绕 Y 旋转（弧度）。
- * 朝向 (cosψ, sinψ, 0) 映射为 (sinψ, 0, cosψ) → rotation.y = ψ - 90° */
+/* Source yaw（度，0=+X 东，逆时针增加，实测与击杀朝向一致）→ three 绕 Y 旋转（弧度）。
+ * Source 前向 (cosψ, sinψ, 0) 映射为 scene (sinψ, 0, cosψ)，
+ * 与模型局部 +z 经 rotation.y=θ 的朝向 (sinθ, 0, cosθ) 对齐 → θ = ψ */
 export function sourceYawToRadians(yawDeg) {
-  return THREE.MathUtils.degToRad(yawDeg) - Math.PI / 2;
+  return THREE.MathUtils.degToRad(yawDeg);
 }

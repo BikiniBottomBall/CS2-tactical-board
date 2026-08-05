@@ -191,14 +191,23 @@ export function createActorVisual(label, isT) {
   armR.position.set(0.66, 1.30, 0);
   const head = new THREE.Mesh(geo.head, mat);
   head.position.y = 2.30;
+  // 胸前标记：让人形正面（局部 +z）可辨识，朝向随 yaw 旋转可见
+  const chest = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 0.5, 0.08),
+    new THREE.MeshLambertMaterial({ color: 0xffffff })
+  );
+  chest.position.set(0, 1.42, 0.28);
 
   // 身体网格包进 bodyGroup：demo 回放击杀倒地时仅旋转/变灰身体，标签与视锥不受影响
   const body = new THREE.Group();
-  body.add(legL, legR, torso, armL, armR, head);
+  body.add(legL, legR, torso, armL, armR, head, chest);
+  // 供 demo 回放跳跃动画（P13.2.2）与击杀倒地复用
+  body.userData.parts = { legL, legR, torso, armL, armR, head };
   group.add(body);
   group.userData.body = body;
 
   const sprite = createMarkerSprite(label, def.css);
+  sprite.material.sizeAttenuation = false; // 标签屏幕恒定大小，不随镜头缩放，跟随人物移动
   sprite.scale.set(0.13, 0.065, 1);
   sprite.position.y = 3.5;
   group.add(sprite);

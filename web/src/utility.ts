@@ -505,6 +505,15 @@ export function spawnLandingEffect(u, pt) {
   else spawnSmokeEffect(pt);
 }
 
+/* 清理所有落地效果与飞行弹体（demo 回放回合切换时调用，跨局不留残效） */
+export function clearLandingEffects() {
+  for (const e of effects) {
+    e.objs.forEach(o => { fxGroup.remove(o); disposeObject(o); });
+  }
+  effects.length = 0;
+  stopPlaying();
+}
+
 /* 主循环钩子：推进弹体 / 落地效果 / 落点环脉冲 */
 export function updateUtility(dt) {
   elapsed += dt;
