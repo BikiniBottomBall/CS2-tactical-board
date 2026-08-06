@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { scene, renderer, mapGroup, isMultiplayer, myUserId } from './state';
 import { MARKER_DEFS } from './config';
+import { createProjectileVisual } from './grenadeModel';
 import { getDotTexture, raycastMapAll } from './board';
 import { registerMode } from './tools';
 import { send } from './network';
@@ -278,10 +279,7 @@ export function playUtility(u) {
   stopPlaying();
   if (!hasCoords(u)) return;
   const def = MARKER_DEFS[u.type] || MARKER_DEFS.smoke;
-  const ball = new THREE.Mesh(
-    new THREE.SphereGeometry(0.9, 12, 12),
-    new THREE.MeshBasicMaterial({ color: def.color })
-  );
+  const ball = createProjectileVisual(u.type);   // P13.2.4：按类型使用 GLB 模型
   fxGroup.add(ball);
   // P13.2.1：投掷轨迹（加色发光高亮，随弹体渐进画出；落地生效后 2s 正常淡出）
   const curve = buildCurve(u);

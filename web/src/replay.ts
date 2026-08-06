@@ -9,6 +9,7 @@ import { scene, collisionMesh } from './state';
 import { ACTOR_DEFS, MARKER_DEFS } from './config';
 import { createActorVisual } from './tactic';
 import { clearLandingEffects, spawnLandingEffect } from './utility';
+import { ensureGrenadeModels, createProjectileVisual, disposeProjectileVisual } from './grenadeModel';
 import { worldToScene, sourceYawToRadians } from './coords';
 import { boardRaycaster } from './board';
 import { registerMode } from './tools';
@@ -126,9 +127,216 @@ const _actorMats: Record<string, THREE.MeshLambertMaterial> = {
 let killEvents: any[] = [];
 let flashEvents: any[] = [];   // { slot, start, end, dur }：被闪状态（起点对齐闪光爆点事件）
 let roundStartTicks: number[] = [];
+let roundEndTicks: number[] = [];   // P13.2.3：round_end 触发跨局清理
 let nameToSlot = new Map<string, number>();
 let lastFeedKey = '';
-let clearedRoundIdx = 0;   // 已执行回合清理的 round_start 数量（跨局清理用）
+let clearedRoundIdx = 0;   // 已执行回合清理的 round_end 数量（跨局清理用）
+
+/* ---- P12.1 对局 HUD（选手面板 / 回合时间 / 存活状态） ---- */
+const HUD_FREEZE_S = 15;    // CS2 默认准备时长
+const HUD_ROUND_S = 115;    // CS2 默认回合时长（1:55）
+const HUD_END_GAP_S = 5;    // 最后一场结束后的兜底倒计时
+const HUD_FILTER_WPN = new Set(['Charm Detachments', 'None']);
+let hud: any = null;        // { rows, dotsT, dotsCT, statTicks, stats, rounds, kda, lastTick }
+
+function fmtHudTime(s: number): string {
+  s = Math.max(0, Math.ceil(s));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/* KDA：由 kill 事件按当前 tick 累计（全场口径），预计算快照供二分查找 */
+function buildKda(): any[] {
+  const n = pack.players.length;
+  const cur = Array.from({ length: n }, () => ({ k: 0, d: 0, a: 0 }));
+  const snaps: any[] = Array.from({ length: n }, () => [{ tick: -1, k: 0, d: 0, a: 0 }]);
+  for (const k of killEvents) {
+    const touched: number[] = [];
+    if (k.attackerSlot >= 0) { cur[k.attackerSlot].k++; touched.push(k.attackerSlot); }
+    if (k.victimSlot >= 0) { cur[k.victimSlot].d++; touched.push(k.victimSlot); }
+    if (k.assister != null && k.assister >= 0 && k.assister < n) { cur[k.assister].a++; touched.push(k.assister); }
+    for (const s of new Set(touched)) snaps[s].push({ tick: k.tick, ...cur[s] });
+  }
+  return snaps;
+}
+
+function kdaAt(slot: number, tick: number): { k: number; d: number; a: number } {
+  const arr = (hud.kda[slot] as any[]) || [{ tick: -1, k: 0, d: 0, a: 0 }];
+  let lo = 0, hi = arr.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (arr[mid].tick <= tick) lo = mid; else hi = mid - 1;
+  }
+  return arr[lo];
+}
+
+/* 当前 tick 最近一次 stats 采样（8Hz） */
+function hudStatsAt(tick: number): any | null {
+  const st = hud.statTicks;
+  let lo = 0, hi = st.length - 1, idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (st[mid] <= tick) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return idx >= 0 ? hud.stats[idx] : null;
+}
+
+function aliveAt(tick: number, slot: number): boolean {
+  const s = hudStatsAt(tick);
+  if (!s) return false;
+  const e = s.p[slot];
+  return !!(e && e[3]);
+}
+
+/* 回合阶段与倒计时：准备时间 → 回合进行中 → 回合结束（依据 pack.rounds） */
+function hudPhase(tick: number): { label: string; remain: number } {
+  const rate = pack.meta.tick_rate;
+  const rounds: any[] = hud.rounds;
+  if (!rounds.length || tick < rounds[0].start) return { label: '开局', remain: 0 };
+  let ri = -1;
+  for (let i = 0; i < rounds.length; i++) {
+    if (rounds[i].start <= tick) ri = i; else break;
+  }
+  if (ri < 0) return { label: '开局', remain: 0 };
+  const r = rounds[ri];
+  const next = rounds[ri + 1] || null;
+  if (tick < r.freeze_end) {
+    return { label: '准备时间', remain: (r.freeze_end - tick) / rate };
+  }
+  if (r.end == null || tick < r.end) {
+    return { label: '回合进行中', remain: (r.freeze_end + HUD_ROUND_S * rate - tick) / rate };
+  }
+  const gapTick = next ? next.start : (r.end != null ? r.end + HUD_END_GAP_S * rate : tick);
+  return { label: '回合结束', remain: (gapTick - tick) / rate };
+}
+
+/* 每回合存活历史条：只显示已结束回合，幸存者取该 round_end 时刻的采样 */
+function renderHistory(tick: number) {
+  const el = document.getElementById('hud-history');
+  if (!el) return;
+  el.innerHTML = '';
+  const rounds: any[] = hud.rounds;
+  for (let i = 0; i < rounds.length; i++) {
+    const r = rounds[i];
+    if (r.end == null || r.end > tick) continue;
+    const item = document.createElement('div');
+    item.className = 'hud-hist' + (r.winner ? ' win-' + (r.winner === 'T' ? 't' : 'ct') : '');
+    const tT = document.createElement('span');
+    tT.className = 'hud-hist-team t';
+    const tC = document.createElement('span');
+    tC.className = 'hud-hist-team ct';
+    for (const p of pack.players) {
+      const d = document.createElement('i');
+      d.className = 'hud-dot' + (aliveAt(r.end, p.slot) ? ' on' : '');
+      (p.team === 'T' ? tT : tC).appendChild(d);
+    }
+    const lab = document.createElement('span');
+    lab.className = 'hud-hist-lab';
+    lab.textContent = `R${i + 1}` + (r.winner ? (r.winner === 'T' ? ' T胜' : ' CT胜') : '');
+    item.append(tT, lab, tC);
+    el.appendChild(item);
+  }
+}
+
+/* 按 tick 刷新 HUD（约 8Hz 节流） */
+function updateHud(tick: number) {
+  if (!hud || !pack) return;
+  if (hud.lastTick >= 0 && tick - hud.lastTick < 8) return;
+  hud.lastTick = tick;
+  const sample = hudStatsAt(tick);
+  const entries = sample ? sample.p : [];
+  for (let s = 0; s < hud.rows.length; s++) {
+    const row = hud.rows[s];
+    const e = entries[s] || null;
+    const alive = !!(e && e[3]);
+    row.root.classList.toggle('dead', !alive);
+    const hp = e ? e[0] : 0, ap = e ? e[1] : 0, money = e ? e[2] : 0;
+    row.hpBar.style.width = hp + '%';
+    row.hpTxt.textContent = String(hp);
+    row.apBar.style.width = ap + '%';
+    row.apTxt.textContent = String(ap);
+    row.money.textContent = '$' + money;
+    const wpn = e && e[4] != null ? pack.weapons[e[4]] : null;
+    row.wpn.textContent = wpn && !HUD_FILTER_WPN.has(wpn) ? String(wpn) : '—';
+    const k = kdaAt(s, tick);
+    row.kda.textContent = `${k.k}/${k.d}/${k.a}`;
+    const dot = s < hud.dotsT.length ? hud.dotsT[s] : hud.dotsCT[s - hud.dotsT.length];
+    if (dot) dot.classList.toggle('on', alive);
+  }
+  const ph = hudPhase(tick);
+  const phaseEl = document.getElementById('hud-phase');
+  const timerEl = document.getElementById('hud-timer');
+  if (phaseEl) phaseEl.textContent = ph.label;
+  if (timerEl) timerEl.textContent = fmtHudTime(ph.remain);
+  renderHistory(tick);
+}
+
+function hideHud() {
+  hud = null;
+  const top = document.getElementById('hud-top');
+  if (top) top.style.display = 'none';   // 保留静态子元素（phase/timer/alive/history）
+  for (const id of ['hud-left', 'hud-right']) {
+    const el = document.getElementById(id);
+    if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+  }
+}
+
+function buildHud() {
+  hideHud();
+  if (!pack || !pack.stats || !pack.stats.length) return;
+  const top = document.getElementById('hud-top');
+  const left = document.getElementById('hud-left');
+  const right = document.getElementById('hud-right');
+  if (!top || !left || !right) return;
+  top.style.display = 'flex';
+  left.style.display = 'block';
+  right.style.display = 'block';
+  const rows: any[] = [];
+  for (const p of pack.players) {
+    const row = document.createElement('div');
+    row.className = 'hud-row ' + (p.team === 'T' ? 't' : 'ct');
+    row.innerHTML =
+      `<div class="hud-name"></div>` +
+      `<div class="hud-bar hp"><i></i><span></span></div>` +
+      `<div class="hud-bar ap"><i></i><span></span></div>` +
+      `<div class="hud-meta"><span class="hud-money"></span><span class="hud-wpn"></span><span class="hud-kda"></span></div>`;
+    (p.team === 'T' ? left : right).appendChild(row);
+    rows[p.slot] = {
+      root: row,
+      name: row.querySelector('.hud-name'),
+      hpBar: row.querySelector('.hp i'),
+      hpTxt: row.querySelector('.hp span'),
+      apBar: row.querySelector('.ap i'),
+      apTxt: row.querySelector('.ap span'),
+      money: row.querySelector('.hud-money'),
+      wpn: row.querySelector('.hud-wpn'),
+      kda: row.querySelector('.hud-kda'),
+    };
+    rows[p.slot].name.textContent = p.name;
+  }
+  const aliveRow = document.getElementById('hud-alive');
+  if (!aliveRow) return;
+  aliveRow.innerHTML = '';
+  const dotT = document.createElement('div');
+  dotT.className = 'hud-dots t';
+  const dotCT = document.createElement('div');
+  dotCT.className = 'hud-dots ct';
+  aliveRow.append(dotT, dotCT);
+  const dotsT: HTMLElement[] = [], dotsCT: HTMLElement[] = [];
+  for (const p of pack.players) {
+    const d = document.createElement('i');
+    d.className = 'hud-dot';
+    (p.team === 'T' ? dotT : dotCT).appendChild(d);
+    (p.team === 'T' ? dotsT : dotsCT).push(d);
+  }
+  hud = {
+    rows, dotsT, dotsCT,
+    statTicks: pack.stats.map((s: any) => s.t),
+    stats: pack.stats,
+    rounds: pack.rounds || [],
+    kda: buildKda(),
+    lastTick: -1,
+  };
+}
 
 function disposeChildren(group) {
   while (group.children.length) {
@@ -220,7 +428,9 @@ async function selectDemo(id) {
     pack = data;
     pack.utility_events.sort((a, b) => a.tick - b.tick);
     duration = pack.meta.duration_s || (pack.meta.max_tick / pack.meta.tick_rate);
+    await ensureGrenadeModels();   // P13.2.4 预载投掷物模型（失败内部回退，不阻塞回放）
     buildActors();
+    buildHud();   // P12.1 对局 HUD
     buildBookmarks();
     document.getElementById('replay-bar').style.display = 'block';
     document.getElementById('replay-slider').max = String(duration);
@@ -237,6 +447,7 @@ function unloadPack() {
   playing = false;
   time = 0;
   firedUtilIdx = 0;
+  hideHud();
   disposeChildren(replayGroup);
   replayGroup.visible = false;
   actorObjs.length = 0;
@@ -245,6 +456,7 @@ function unloadPack() {
   killEvents = [];
   flashEvents = [];
   roundStartTicks = [];
+  roundEndTicks = [];
   nameToSlot.clear();
   lastFeedKey = '';
   clearedRoundIdx = 0;
@@ -262,6 +474,10 @@ function buildKillIndex() {
   });
   roundStartTicks = (pack.events || [])
     .filter(e => e.type === 'round_start')
+    .map(e => e.tick)
+    .sort((a, b) => a - b);
+  roundEndTicks = (pack.events || [])
+    .filter(e => e.type === 'round_end')
     .map(e => e.tick)
     .sort((a, b) => a - b);
   killEvents = (pack.events || [])
@@ -326,6 +542,7 @@ function normalizeKill(e) {
     headshot: !!headshot,
     attackerSlot: nameToSlot.has(attacker) ? nameToSlot.get(attacker) : -1,
     victimSlot: nameToSlot.has(user) ? nameToSlot.get(user) : -1,
+    assister: e.assister != null ? e.assister : -1,
     label: e.label || '',
   };
 }
@@ -337,6 +554,16 @@ function lastRoundStart(tick: number): number {
     else break;
   }
   return rs;
+}
+
+/* P13.2.3：最近一次 round_end（本局起点判定用；0 表示第一局尚未结束） */
+function lastRoundEnd(tick: number): number {
+  let re = 0;
+  for (const t of roundEndTicks) {
+    if (t <= tick) re = t;
+    else break;
+  }
+  return re;
 }
 
 function getKillsInWindow(tick: number, winS: number, rs: number): any[] {
@@ -557,6 +784,7 @@ function seek(t) {
     const windowTicks = 16 * pack.meta.tick_rate;
     let idx = pack.utility_events.findIndex(e => e.tick > tick - windowTicks);
     firedUtilIdx = idx < 0 ? pack.utility_events.length : idx;
+    if (hud) hud.lastTick = -1;   // 跳转时强制刷新 HUD
     renderFrame();
   }
   syncTimelineUI();
@@ -567,8 +795,8 @@ function renderFrame() {
   const rate = pack.meta.tick_rate;
   const se = pack.meta.sample_every;
   const tick = time * rate;
-  // 回合切换：清理上一局残留的道具轨迹 / 弹道球 / 落地效果
-  while (clearedRoundIdx < roundStartTicks.length && tick >= roundStartTicks[clearedRoundIdx]) {
+  // P13.2.3 round_end 触发：清理本局残留的道具轨迹 / 弹道网格 / 落地效果
+  while (clearedRoundIdx < roundEndTicks.length && tick >= roundEndTicks[clearedRoundIdx]) {
     clearLandingEffects();
     for (const [, tr] of grenadeTrails) {
       replayGroup.remove(tr.line);
@@ -578,8 +806,7 @@ function renderFrame() {
     grenadeTrails.clear();
     for (const [, mesh] of projectilePool) {
       replayGroup.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
+      disposeProjectileVisual(mesh);
     }
     projectilePool.clear();
     clearedRoundIdx++;
@@ -625,8 +852,10 @@ function renderFrame() {
   }
 
   // 道具事件：到点放效果
+  const roundBase = lastRoundEnd(tick);   // P13.2.3：本局起点（最近一次 round_end）
   while (firedUtilIdx < pack.utility_events.length && pack.utility_events[firedUtilIdx].tick <= tick) {
     const e = pack.utility_events[firedUtilIdx++];
+    if (e.tick <= roundBase) continue;    // P13.2.3：上一局的落点效果已清除，不复活
     spawnLandingEffect({ type: e.type }, worldToScene(e.x, e.y, e.z, new THREE.Vector3()));
   }
 
@@ -637,6 +866,7 @@ function renderFrame() {
     const first = pts[0][0];
     const last = pts[pts.length - 1][0];
     if (tick < first) continue;
+    if (first <= roundBase) continue;     // P13.2.3：上一局/更早的轨迹不再显示
     // P13.2.1：弹道轨迹（加色发光高亮，懒创建，随弹体渐进画出；落地/生效后 2s 正常淡出）
     let tr = grenadeTrails.get(g);
     if (!tr) {
@@ -668,11 +898,7 @@ function renderFrame() {
     active.add(g);
     let mesh = projectilePool.get(g);
     if (!mesh) {
-      const def = MARKER_DEFS[g.type] || MARKER_DEFS.smoke;
-      mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.7, 10, 10),
-        new THREE.MeshBasicMaterial({ color: def.color })
-      );
+      mesh = createProjectileVisual(g.type);
       replayGroup.add(mesh);
       projectilePool.set(g, mesh);
     }
@@ -709,6 +935,7 @@ function renderFrame() {
 
   // P12：击杀状态（倒地/高亮/kill feed）按当前时间快照同步
   applyKillState(tick, flashBySlot);
+  updateHud(tick);   // P12.1 对局 HUD
 }
 
 function syncTimelineUI() {
@@ -748,7 +975,7 @@ export function initReplay() {
       document.body.classList.add('demo');
       fetchDemos();
     },
-    exit: () => { document.body.classList.remove('demo'); },
+    exit: () => { document.body.classList.remove('demo'); hideHud(); },
   });
   document.getElementById('demo-upload-btn').addEventListener('click', () => {
     document.getElementById('demo-upload-file').click();

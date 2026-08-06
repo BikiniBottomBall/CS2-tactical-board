@@ -14,6 +14,7 @@ import { initTools, setMode } from './tools';
 import { initUtility, updateUtility } from './utility';
 import { initTactic, updateTactic } from './tactic';
 import { initReplay, updateReplay } from './replay';
+import { ensureGrenadeModels } from './grenadeModel';
 import { initGrid, updateGrid } from './grid';
 import * as _coords from './coords';
 import { initAnnotate } from './annotate';
@@ -102,6 +103,7 @@ function init() {
   initUtility();
   initTactic();
   initReplay();
+  ensureGrenadeModels().catch(err => console.warn('[grenadeModel] 预载失败', err));   // P13.2.4
   initGrid();
   initAnnotate();
   initTools(); // 最后：模式注册完毕后统一刷新侧边栏高亮

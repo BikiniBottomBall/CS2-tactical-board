@@ -21,6 +21,7 @@ from demoparser2 import DemoParser
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARSED_DIR = os.path.join(ROOT, 'data', 'demos', 'parsed')
 SAMPLE_EVERY = 4  # 64tick → 16Hz
+SAMPLE_STATS = 8  # P12.1 HUD 统计采样（64tick → 8Hz）
 
 EVENT_NAMES = [
     'round_start', 'round_end', 'player_death', 'bomb_planted', 'bomb_defused',
@@ -30,6 +31,24 @@ EVENT_NAMES = [
 
 def r1(v):
     return round(float(v), 1)
+
+
+def _fstr(v):
+    """NaN/None -> None，否则字符串（demoparser2 缺失列常返回 NaN）"""
+    if v is None:
+        return None
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    s = str(v)
+    return s if s and s != 'nan' else None
+
+
+def _fbool(v):
+    if v is None:
+        return False
+    if isinstance(v, float) and math.isnan(v):
+        return False
+    return bool(v)
 
 
 def map_grenade_type(cls: str) -> str:
@@ -134,6 +153,44 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
             arr[slot] = [r1(row.X), r1(row.Y), r1(row.Z), r1(yaw), r1(remaining)]
         frames.append({'t': int(tick), 'p': arr})
 
+    # ---- P12.1 对局 HUD 统计：8Hz 采样 经济/血量/护甲/武器/存活 ----
+    stats = []
+    weapons = []
+    wpn_idx = {}
+    try:
+        sdf = parser.parse_ticks(['health', 'armor', 'is_alive', 'active_weapon_name'])
+        sdf = sdf[sdf['tick'] % SAMPLE_STATS == 0]
+        # 友好名 'money' 会被该库静默丢弃，需用原始 netprop 名并重命名
+        money_prop = 'CCSPlayerController.CCSPlayerController_InGameMoneyServices.m_iAccount'
+        mdf = parser.parse_ticks([money_prop]).rename(columns={money_prop: 'money'})
+        mdf = mdf[mdf['tick'] % SAMPLE_STATS == 0]
+        money_map = {}
+        for r in mdf.itertuples():
+            m = r.money
+            money_map[(int(r.tick), str(r.steamid))] = (
+                0 if (isinstance(m, float) and math.isnan(m)) else int(round(float(m))))
+        for tick, g in sdf.groupby('tick'):
+            arr = [None] * len(players)
+            for row in g.itertuples():
+                slot = slot_of.get(str(row.steamid))
+                if slot is None:
+                    continue
+                wpn = _fstr(row.active_weapon_name)
+                if wpn is not None:
+                    if wpn not in wpn_idx:
+                        wpn_idx[wpn] = len(weapons)
+                        weapons.append(wpn)
+                h = row.health
+                hp = 0 if (isinstance(h, float) and math.isnan(h)) else int(round(float(h)))
+                a = row.armor
+                ap = 0 if (isinstance(a, float) and math.isnan(a)) else int(round(float(a)))
+                money = money_map.get((int(tick), str(row.steamid)), 0)
+                arr[slot] = [hp, ap, money, 1 if _fbool(row.is_alive) else 0,
+                             wpn_idx[wpn] if wpn is not None else None]
+            stats.append({'t': int(tick), 'p': arr})
+    except Exception as e:
+        print(f'[parse] HUD 统计解析失败（继续）: {e}', file=sys.stderr)
+
     # ---- 道具弹道（真实逐点，抽帧） ----
     grenades = []
     try:
@@ -195,6 +252,11 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
             label = f'{attacker} 击杀 {user}（{weapon}）'
             if headshot:
                 label += '（爆头）'
+            assister_sid = getattr(r, 'assister_steamid', None)
+            if assister_sid is not None and not (isinstance(assister_sid, float) and math.isnan(assister_sid)):
+                assister = slot_of.get(str(assister_sid))
+            else:
+                assister = None
             events.append({
                 'tick': int(r.tick),
                 'type': 'kill',
@@ -203,6 +265,7 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
                 'user': str(user),
                 'weapon': weapon,
                 'headshot': headshot,
+                'assister': assister,
             })
     bp = ev.get('bomb_planted')
     if bp is not None and hasattr(bp, 'itertuples'):
@@ -216,12 +279,40 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
                            'label': f'{getattr(r, "user_name", "")} 拆包'})
     events.sort(key=lambda e: e['tick'])
 
+    # ---- P12.1 回合元数据（与回放 round 模型一致：round_start[i] ↔ round_end[i]） ----
+    rs_list = []
+    if rs is not None and hasattr(rs, 'itertuples'):
+        rs_list = sorted({int(r.tick) for r in rs.itertuples()})
+    re_list = []
+    re_winner = {}
+    if re_df is not None and hasattr(re_df, 'itertuples'):
+        for r in re_df.itertuples():
+            winner = getattr(r, 'winner', None)
+            if winner is None or str(winner) == 'nan':
+                continue
+            s = str(winner).upper()
+            team = 'T' if s in ('2', 'T', 'TERRORIST') else (
+                'CT' if s in ('3', 'CT', 'COUNTER_TERRORISTS') else None)
+            re_list.append(int(r.tick))
+            re_winner[int(r.tick)] = team
+        re_list.sort()
+    rounds = []
+    for i, start in enumerate(rs_list):
+        end = re_list[i] if i < len(re_list) else None
+        rounds.append({
+            'start': start,
+            'freeze_end': start + 15 * tick_rate,  # CS2 默认准备时长 15s
+            'end': end,
+            'winner': re_winner.get(end) if end is not None else None,
+        })
+
     pack = {
         'meta': {
             'name': stem,
             'map': map_name,
             'tick_rate': tick_rate,  # 假定值（header 不含），可用 --tick-rate 覆盖
             'sample_every': SAMPLE_EVERY,
+            'sample_stats': SAMPLE_STATS,
             'max_tick': max_tick,
             'duration_s': round(max_tick / tick_rate, 1),
             'coord_space': 'source',  # 原始 Source 单位/坐标系，前端负责转换
@@ -231,6 +322,9 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
         'grenades': grenades,
         'utility_events': utility_events,
         'events': events,
+        'stats': stats,
+        'rounds': rounds,
+        'weapons': weapons,
     }
 
     os.makedirs(out_dir, exist_ok=True)
@@ -244,6 +338,9 @@ def parse_demo(dem_path: str, out_dir: str = PARSED_DIR, tick_rate: int = 64) ->
     meta['grenades'] = len(grenades)
     meta['utility_events'] = len(utility_events)
     meta['events'] = len(events)
+    meta['stats'] = len(stats)
+    meta['rounds'] = len(rounds)
+    meta['weapons'] = len(weapons)
     return meta, events
 
 
